@@ -7,7 +7,10 @@ authors = [
     { name = "gatory", email = "kuandev06@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "cyclonedds==0.10.2",
+    "unitree-sdk2py",
+]
 
 [project.scripts]
 h2-bridge = "h2_bridge:main"
@@ -15,3 +18,6 @@ h2-bridge = "h2_bridge:main"
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+unitree-sdk2py = { path = "../../unitree_sdk2_python", editable = true }
