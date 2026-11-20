@@ -41,7 +41,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cyclonedds", specifier = "==0.10.2" },
-    { name = "unitree-sdk2py", editable = "../../unitree_sdk2_python" },
+    { name = "unitree-sdk2py", directory = "../../unitree_sdk2_python" },
 ]
 
 [[package]]
@@ -197,7 +197,7 @@ wheels = [
 [[package]]
 name = "unitree-sdk2py"
 version = "1.0.1"
-source = { editable = "../../unitree_sdk2_python" }
+source = { directory = "../../unitree_sdk2_python" }
 dependencies = [
     { name = "cyclonedds" },
     { name = "numpy" },

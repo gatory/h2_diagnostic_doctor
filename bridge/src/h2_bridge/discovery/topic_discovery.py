@@ -1,10 +1,13 @@
 import time
 
-def discover_topics(domain=0, secs=10):
-    """Discover available topics in the system.
+
+def discover_publishers(iface="eth10", domain=0, secs=10):
+    """Discover available publishers and their topics in the system.
 
     Parameters
     -----------
+    iface: str
+        The network interface to use for discovery.
     domain: int
         The DDS domain to discover topics in.
     secs: int
@@ -13,17 +16,31 @@ def discover_topics(domain=0, secs=10):
     Returns
     -------
     topics: dict
-        A dictionary mapping topic names to their information.
-
-    Raises
-    ------
-    None
-    
+        A dictionary mapping topic names to their information.    
     """
 
     from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsPublication
-    from cyclonedds.domain import DomainParticipant
+    from cyclonedds.domain import Domain, DomainParticipant
 
+    # Chose to setup CycloneDDS configuration instead using the unitree_sdkpy for independent configuration.
+    config_xml = f"""
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <CycloneDDS>
+        <Domain Id="any">
+            <General>
+                <Interfaces>
+                    <NetworkInterface name="{iface}" priority="default" multicast="default"/>
+                </Interfaces>
+            </General>
+            <Tracing>
+                <Verbosity>config</Verbosity>
+                <OutputFile>/tmp/cdds.LOG</OutputFile>
+            </Tracing>
+        </Domain>
+    </CycloneDDS>
+    """
+
+    dds_domain = Domain(domain_id=domain, config=config_xml)
     dp = DomainParticipant(domain)
     reader = BuiltinDataReader(dp, BuiltinTopicDcpsPublication)
 
@@ -47,6 +64,6 @@ def discover_topics(domain=0, secs=10):
     return topics
 
 if __name__ == "__main__":
-    topics = discover_topics()
+    topics = discover_publishers()
     # for name, info in topics.items():
     #     print(f"Topic: {name}, Type: {info['type_name']}, Writers: {len(info['writers'])}, Participants: {len(info['participants'])}")
