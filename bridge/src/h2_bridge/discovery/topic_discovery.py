@@ -50,20 +50,34 @@ def discover_publishers(iface="eth10", domain=0, secs=10):
 
     while time.monotonic() < deadline:
         # using take() instead of read() so that we take it out of the topic queue don't get the same data multiple times
-        for topic in reader.take(256):
-            name = getattr(topic, "topic_name", None)
+        for endpoint in reader.take(256):
+            name = getattr(endpoint, "topic_name", None)
             if not name:
                 continue
 
-            entry = topics.setdefault(name, {"type_name": topic.type_name, "writers": set(), "participants": set()})
-
-            print(type(topic), topic)
-
+            entry = topics.setdefault(name, {"msg_type": endpoint.type_name, "writers": set(), "participants": set()})
+            entry["writers"].add(str(endpoint.key))
+            entry["participants"].add(str(endpoint.participant_key))
+        
         time.sleep(0.1)  # Sleep briefly to avoid busy waiting
 
+        """ Example of the returned topics dictionary:
+            topics = {
+                "rt/lowstate": {                                        # key: the topic name (a string)
+                    "msg_type": "unitree_hg::msg::dds_::LowState_",     # a string
+                    "writers": {"3f2a...", "9c1b..."},                  # a set of writer IDs
+                    "participants": {"a7e0..."},                        # a set of participant IDs
+                },
+                "rt/lf/bmsstate": {
+                    "msg_type": "...",
+                    "writers": {...},
+                    "participants": {...},
+                },
+            }
+        """
     return topics
 
 if __name__ == "__main__":
     topics = discover_publishers()
-    # for name, info in topics.items():
-    #     print(f"Topic: {name}, Type: {info['type_name']}, Writers: {len(info['writers'])}, Participants: {len(info['participants'])}")
+    for name, info in topics.items():
+        print(f"Topic: {name}, Type: {info['msg_type']}, Writers: {len(info['writers'])}, Participants: {len(info['participants'])}")
