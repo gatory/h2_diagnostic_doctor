@@ -119,6 +119,11 @@ def save_topics_to_file(topics, filename=None):
         The dictionary returned by discover_publishers().
     filename: str
         The name of the file to save the topics to.
+
+    Returns
+    -------
+    filename: str
+        The path the topics were written to.
     """
     import json
 
@@ -127,8 +132,16 @@ def save_topics_to_file(topics, filename=None):
         filename = f"discovered_topics_{timestamp}.json"
 
 
+    # sets aren't JSON serializable, so convert them to sorted lists
+    serializable = {
+        name: {k: sorted(v) if isinstance(v, set) else v for k, v in info.items()}
+        for name, info in topics.items()
+    }
+
     with open(filename, "w") as f:
-        json.dump(topics, f, indent=4)
+        json.dump(serializable, f, indent=4)
+
+    return filename
 
 
 if __name__ == "__main__":

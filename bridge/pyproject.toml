@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-h2-bridge = "h2_bridge:main"
+h2-doctor = "h2_bridge.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]
