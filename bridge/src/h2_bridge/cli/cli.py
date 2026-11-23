@@ -9,10 +9,12 @@ own module.
 """
 
 import argparse
+import sys
 
 from h2_bridge import __version__
 from h2_bridge.cli import discovery, telemetry
 from h2_bridge.constants import DDS_DEFAULTS
+from h2_bridge.dds import DDSError
 
 
 def build_parser():
@@ -47,3 +49,7 @@ def cli(args=None):
         return ns.func(ns)
     except KeyboardInterrupt:
         return 130  # shell convention for "stopped by Ctrl-C"
+    except DDSError as e:
+        # Expected failure (bad interface, etc.): one clear line, not a traceback.
+        print(f"h2-doctor: error: {e}", file=sys.stderr)
+        return 1

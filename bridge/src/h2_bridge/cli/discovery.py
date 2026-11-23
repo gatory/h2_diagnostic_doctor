@@ -25,7 +25,7 @@ def _cmd_topics(args):
     """Handler for `h2-doctor discovery topics`."""
     from rich.console import Console
 
-    from h2_bridge.discovery.topic_discovery import (
+    from h2_bridge.discovery.discover_topics import (
         discover_publishers,
         get_topics_table,
         save_topics_to_file,
