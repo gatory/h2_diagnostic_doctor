@@ -33,28 +33,11 @@ def discover_publishers(iface="eth10", domain=0, secs=10):
     """
 
     from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsPublication
-    from cyclonedds.domain import Domain, DomainParticipant
 
-    # Chose to setup CycloneDDS configuration instead using the unitree_sdkpy for independent configuration.
-    config_xml = f"""
-    <?xml version="1.0" encoding="UTF-8" ?>
-    <CycloneDDS>
-        <Domain Id="any">
-            <General>
-                <Interfaces>
-                    <NetworkInterface name="{iface}" priority="default" multicast="default"/>
-                </Interfaces>
-            </General>
-            <Tracing>
-                <Verbosity>config</Verbosity>
-                <OutputFile>/tmp/cdds.LOG</OutputFile>
-            </Tracing>
-        </Domain>
-    </CycloneDDS>
-    """
+    from h2_bridge.dds import init_dds, make_participant
 
-    dds_domain = Domain(domain_id=domain, config=config_xml)
-    dp = DomainParticipant(domain)
+    init_dds(iface, domain)
+    dp = make_participant()
     reader = BuiltinDataReader(dp, BuiltinTopicDcpsPublication)
 
 
