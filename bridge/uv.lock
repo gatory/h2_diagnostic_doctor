@@ -35,12 +35,14 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclonedds" },
+    { name = "rich" },
     { name = "unitree-sdk2py" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cyclonedds", specifier = "==0.10.2" },
+    { name = "rich", specifier = ">=15.0.0" },
     { name = "unitree-sdk2py", directory = "../../unitree_sdk2_python" },
 ]
 
