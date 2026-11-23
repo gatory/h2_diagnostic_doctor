@@ -26,12 +26,12 @@ class Endpoint:
     """One writer or reader on a topic."""
 
     key: str
-    participant_key: str  # which Participant owns this endpoint
+    participant_key: str  # endpoint owner ID
     kind: EndpointKind
     topic_name: str
-    type_name: str  # stored per endpoint: one topic can carry several types
-    reliability: str | None = None  # e.g. "reliable" / "best_effort"
-    durability: str | None = None  # e.g. "volatile" / "transient_local"
+    type_name: str  # msg type
+    qos: dict = field(default_factory=dict) # QoS policies as a dict, for inspection
+    has_type_info: bool = False # True if it announced a type ID (its type definition may be fetchable)
 
 
 @dataclass
