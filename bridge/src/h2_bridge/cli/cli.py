@@ -1,4 +1,6 @@
-"""Root parser for `h2-doctor` command line.
+""" Root parser for 'h2-doctor' cli tool
+
+Example Usage:
 
     h2-doctor [--iface IFACE] [--domain N] <group> <command> ...
 
