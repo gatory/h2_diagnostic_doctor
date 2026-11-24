@@ -8,7 +8,7 @@ what it sees, without grouping or interpreting it (see models.py):
     DCPSSubscription  -> Endpoint(kind="reader")
 
 This is the only discovery module that touches DDS. 
-Work with finished Snapshot lives in analysis.py (views of it) and persistance.py (save/load).
+Work with finished Snapshot lives in analysis.py (views of it) and persistence.py (save/load).
 """
 
 import os
