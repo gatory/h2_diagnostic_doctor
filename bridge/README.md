@@ -40,6 +40,11 @@ Defaults live in `DDS_DEFAULTS` in `src/h2_bridge/constants.py`. Edit that file 
 
 `h2-doctor discovery topics` lists every topic seen on the network, with how many writers (publishers) and readers (subscribers) it has. A topic with readers but 0 writers means something is listening for data nobody sends.
 
+**A snapshot lists what existed during the run, not what is alive at the end.** A program that leaves partway through (exits, crashes or restarts) stays listed with what it announced. DDS's "gone" notices are ignored on purpose: whether data is still flowing is telemetry's job. Two consequences:
+
+- DDS only notices a program died without saying goodbye once its *lease* runs out (10 s in our tests), so even live tools see departures late.
+- A program that restarts during a run can show up twice: same name, two PIDs and two Participant IDs.
+
 | Option                     | Default | Meaning                                  |
 | -------------------------- | ------- | ---------------------------------------- |
 | `-t SECS`, `--duration SECS` | `10`    | Seconds to listen (longer catches programs that announce slowly) |

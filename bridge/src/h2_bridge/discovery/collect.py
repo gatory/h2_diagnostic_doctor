@@ -62,15 +62,19 @@ def collect_snapshot(interface, domain_id, secs=10):
     deadline = time.monotonic() + secs
     while time.monotonic() < deadline:
         # take() removes samples from the reader's queue, so each is handled once.
+        # Only real announcements count; "gone" notices are skipped (see _is_announcement).
         for sample in participant_reader.take(256):
-            p = _to_participant(sample)
-            participants[p.key] = p
+            if _is_announcement(sample):
+                p = _to_participant(sample)
+                participants[p.key] = p
         for sample in writer_reader.take(256):
-            e = _to_endpoint(sample, "writer")
-            endpoints[e.key] = e
+            if _is_announcement(sample):
+                e = _to_endpoint(sample, "writer")
+                endpoints[e.key] = e
         for sample in reader_reader.take(256):
-            e = _to_endpoint(sample, "reader")
-            endpoints[e.key] = e
+            if _is_announcement(sample):
+                e = _to_endpoint(sample, "reader")
+                endpoints[e.key] = e
         time.sleep(0.1)  # don't busy-wait
 
     # Drop this process's own participants and everything they own.
@@ -85,6 +89,18 @@ def collect_snapshot(interface, domain_id, secs=10):
         participants=[p for key, p in participants.items() if key not in own],
         endpoints=[e for e in endpoints.values() if e.participant_key not in own],
     )
+
+
+def _is_announcement(sample):
+    """True for a real announcement, False for a "gone" notice.
+
+    When a program leaves (or its lease runs out, ~10 s after it dies without
+    saying goodbye), DDS sends a notice with only the key: valid_data is False,
+    and qos is None. Discovery records what *existed* during the run, so a
+    program that left stays listed with its last real announcement; noticing
+    that something went quiet is telemetry's job.
+    """
+    return sample.sample_info.valid_data
 
 
 def _to_participant(sample):
