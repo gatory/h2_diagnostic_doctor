@@ -1,7 +1,7 @@
 """`h2-doctor telemetry ...` commands: read the robot's live data.
 
     h2-doctor telemetry watch <topic>
-    h2-doctor telemetry record -o FILE
+    h2-doctor telemetry record
     h2-doctor telemetry replay FILE
 
 Scaffold only: the commands parse arguments but don't do anything yet.
@@ -19,9 +19,8 @@ def register(commands):
     watch.add_argument("topic", help="DDS topic name, e.g. rt/lf/lowstate")
     watch.set_defaults(func=_not_implemented)
 
-    # h2-doctor telemetry record -o FILE
-    record = telemetry_cmds.add_parser("record", help="Save telemetry to a file")
-    record.add_argument("-o", "--output", metavar="FILE", required=True, help="File to write the recording to")
+    # h2-doctor telemetry record  (saves to outputs/telemetry/<date>/ via h2_bridge.outputs)
+    record = telemetry_cmds.add_parser("record", help="Save telemetry to outputs/telemetry/<date>/")
     record.set_defaults(func=_not_implemented)
 
     # h2-doctor telemetry replay FILE
