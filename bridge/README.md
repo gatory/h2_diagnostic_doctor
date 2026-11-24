@@ -52,6 +52,15 @@ uv run h2-doctor discovery topics -t 5 --save         # listen 5s, then save
 uv run h2-doctor discovery topics --save [custome_file_name]  # → outputs/discovery/<date>/custome_file_name_<time>_<iface>.json
 ```
 
+`h2-doctor discovery show` reads a saved snapshot from `outputs/discovery/` and prints the same table, with a line saying when, where and how long it was taken. It needs no robot or network, so it works on your laptop after copying `outputs/` over.
+
+```bash
+uv run h2-doctor discovery show                        # newest saved snapshot
+uv run h2-doctor discovery show before_walk            # newest snapshot saved as `--save before_walk`
+uv run h2-doctor discovery show snapshot_155001_eth10  # one exact file (name without .json)
+uv run h2-doctor discovery show --list                 # table of all saved snapshots
+```
+
 ### `telemetry`: the robot's live data (scaffold)
 
 The commands exist so you can see the shape, but each one currently prints "not implemented yet" and exits with `1`.
