@@ -71,3 +71,6 @@ Thumbs.db
 
 # Agents and Logs
 CLAUDE.md
+
+# Outputs and Recordings
+bridge/outputs/

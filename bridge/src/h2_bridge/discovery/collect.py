@@ -135,24 +135,20 @@ def group_by_topic(snapshot):
     return topics
 
 
-def save_snapshot(snapshot, path=None):
-    """Write a Snapshot as JSON and return the path it was written to.
+def save_snapshot(snapshot, name="snapshot"):
+    """Write a Snapshot as JSON to the outputs folder and return the path.
 
-    With no `path`, it goes in the outputs folder, named after when the run
-    started: outputs/discovery/<date>/snapshot_<time>_<interface>.json
+    The folder is fixed; `name` only sets the start of the file name.
+    The time is when the run started:
+    outputs/discovery/<date>/<name>_<time>_<interface>.json
     """
     import json
     from dataclasses import asdict
-    from pathlib import Path
 
     from h2_bridge.outputs import output_path
 
-    if path is None:
-        started = datetime.fromisoformat(snapshot.taken_at)
-        path = output_path("discovery", "snapshot", snapshot.iface, when=started)
-    else:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+    started = datetime.fromisoformat(snapshot.taken_at)
+    path = output_path("discovery", name, snapshot.iface, when=started)
 
     with open(path, "w") as f:
         json.dump(asdict(snapshot), f, indent=2)

@@ -1,8 +1,8 @@
 """`h2-doctor discovery ...` commands: inspect what's on the DDS network.
 
     h2-doctor discovery topics
-    h2-doctor discovery topics --save
-    h2-doctor discovery topics -t 5 -o snapshot.json
+    h2-doctor discovery topics -t 5 --save
+    h2-doctor discovery topics --save [custom_file_name]
 
 This module only parses arguments and prints results."""
 
@@ -18,13 +18,14 @@ def register(commands):
         "-t", "--duration", type=float, default=10, metavar="SECS",
         help="Seconds to listen (default: %(default)s)",
     )
-    # Saving: --save uses the organized outputs folder, -o picks an exact file. Only one at a time.
-    save = topics.add_mutually_exclusive_group()
-    save.add_argument(
-        "-s", "--save", action="store_true",
-        help="Also save the full snapshot to outputs/discovery/<date>/",
+    # --save alone      -> name "snapshot"
+    # --save my_label   -> name "my_label"   (the folder can't be changed)
+    # not given         -> None, nothing saved
+    topics.add_argument(
+        "-s", "--save", nargs="?", const="snapshot", default=None, type=_save_name, metavar="NAME",
+        help="Also save the full snapshot to outputs/discovery/<date>/, "
+             "optionally named NAME (default name: snapshot)",
     )
-    save.add_argument("-o", "--output", metavar="FILE", help="Also save the full snapshot to this exact file")
     topics.set_defaults(func=_cmd_topics)
 
 
@@ -46,11 +47,23 @@ def _cmd_topics(args):
 
     out.print(_topics_table(group_by_topic(snapshot)))
 
-    if args.save or args.output:
-        path = save_snapshot(snapshot, args.output)  # output=None -> outputs folder
+    if args.save:
+        path = save_snapshot(snapshot, name=args.save)
         err.print(f"[green]Saved snapshot to[/] {path}")
 
     return 0
+
+
+def _save_name(value):
+    """argparse type for --save: check the name before any discovery runs."""
+    import argparse
+
+    from h2_bridge.outputs import check_name
+
+    try:
+        return check_name(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
 
 
 def _topics_table(topics):

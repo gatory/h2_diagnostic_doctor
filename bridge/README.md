@@ -43,13 +43,13 @@ Defaults live in `DDS_DEFAULTS` in `src/h2_bridge/model.py`. Edit that file to c
 | Option                     | Default | Meaning                                  |
 | -------------------------- | ------- | ---------------------------------------- |
 | `-t SECS`, `--duration SECS` | `10`    | Seconds to listen for publishers         |
-| `-s`, `--save`               |         | Also save the full snapshot (participants, endpoints, QoS) to `outputs/` |
-| `-o FILE`, `--output FILE`   |         | Same, but to this exact file instead (not with `--save`) |
+| `-s [NAME]`, `--save [NAME]` |         | Also save the full snapshot (participants, endpoints, QoS) to `outputs/`, optionally named NAME (default: `snapshot`) |
 
 ```bash
 uv run h2-doctor discovery topics                     # listen 10s, print a table
 uv run h2-doctor discovery topics --save              # also save to outputs/discovery/<date>/
-uv run h2-doctor discovery topics -t 5 -o snapshot.json # listen 5s, save to snapshot.json
+uv run h2-doctor discovery topics -t 5 --save         # listen 5s, then save
+uv run h2-doctor discovery topics --save [custome_file_name]  # → outputs/discovery/<date>/custome_file_name_<time>_<iface>.json
 ```
 
 ### `telemetry`: the robot's live data (scaffold)
@@ -58,7 +58,7 @@ The commands exist so you can see the shape, but each one currently prints "not 
 
 ```bash
 uv run h2-doctor telemetry watch rt/lf/lowstate   # print one topic as messages arrive
-uv run h2-doctor telemetry record -o FILE         # save telemetry to a file
+uv run h2-doctor telemetry record                 # save telemetry to outputs/telemetry/<date>/
 uv run h2-doctor telemetry replay FILE            # play a recording back
 ```
 
@@ -71,7 +71,7 @@ outputs/<group>/<YYYY-MM-DD>/<name>_<HHMMSS>_<interface>.json
 outputs/discovery/2026-11-23/snapshot_161435_eth10.json
 ```
 
-The time is when the run started. The interface in the name tells robot runs (`eth10`) apart from laptop tests. `h2_bridge/outputs.py` builds these paths, so every command saves the same way.
+The time is when the run started. The interface in the name tells robot runs (`eth10`) apart from laptop tests. Every saved file gets its path from `h2_bridge/outputs.py`. You can choose the `<name>` part (letters, digits, `-`, `_`, `.`), but never the folder, so all results end up in this one place.
 
 ### Output and exit codes
 
