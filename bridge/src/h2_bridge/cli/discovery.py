@@ -110,7 +110,9 @@ def _cmd_topics(args):
     """Handler for `h2-doctor discovery topics`: collect a snapshot, print the per-topic summary, maybe save it."""
     from rich.console import Console
 
-    from h2_bridge.discovery.collect import collect_snapshot, group_by_topic, save_snapshot
+    from h2_bridge.discovery.analysis import group_by_topic
+    from h2_bridge.discovery.collect import collect_snapshot
+    from h2_bridge.discovery.persistence import save_snapshot
 
     out = Console()  # stdout: the data itself
     err = Console(stderr=True)  # stderr: spinner and messages, so piping stdout stays clean
@@ -140,7 +142,8 @@ def _cmd_show(args):
     """
     from rich.console import Console
 
-    from h2_bridge.discovery.collect import group_by_topic, load_snapshot
+    from h2_bridge.discovery.analysis import group_by_topic
+    from h2_bridge.discovery.persistence import load_snapshot
     from h2_bridge.outputs import find_outputs
 
     out = Console()
@@ -174,7 +177,7 @@ def _cmd_show(args):
 
     out.print(
         f"[bold]{chosen.path.name}[/]  taken {snapshot.taken_at} on {snapshot.host}, "
-        f"{snapshot.iface} (domain {snapshot.domain}), {snapshot.duration_s}s: "
+        f"{snapshot.interface} (domain {snapshot.domain_id}), {snapshot.duration_s}s: "
         f"{len(snapshot.participants)} participants, {len(snapshot.endpoints)} endpoints"
     )
 
@@ -211,7 +214,7 @@ def _add_owner_columns(table):
 
 def _owner_cells(participant, participant_key):
     """Cell values for the owner columns. `participant` may be None if it wasn't seen."""
-    from h2_bridge.discovery.collect import participant_ips
+    from h2_bridge.discovery.analysis import get_participant_ips
 
     if participant is None:
         return [participant_key[:13], "?", "?", "?", "?"]
@@ -221,7 +224,7 @@ def _owner_cells(participant, participant_key):
         props.get("__ProcessName", "?"),
         props.get("__Pid", "?"),
         props.get("__Hostname", "?"),
-        ", ".join(participant_ips(participant)) or "?",
+        ", ".join(get_participant_ips(participant)) or "?",
     ]
 
 
@@ -246,9 +249,9 @@ def _participants_table(snapshot):
     """
     from rich.table import Table
 
-    from h2_bridge.discovery.collect import endpoints_by_participant
+    from h2_bridge.discovery.analysis import group_endpoints_by_participant
 
-    owned = endpoints_by_participant(snapshot)
+    owned = group_endpoints_by_participant(snapshot)
 
     table = Table(title="Participants", header_style="bold cyan")
     _add_owner_columns(table)

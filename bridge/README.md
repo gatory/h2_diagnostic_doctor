@@ -113,8 +113,11 @@ src/h2_bridge/
   cli/cli.py        # root parser + global options; registers each group
   cli/discovery.py  # `discovery` commands  ->  calls h2_bridge.discovery
   cli/telemetry.py  # `telemetry` commands (scaffold, will call h2_bridge.telemetry)
-  discovery/        # discovery logic (no argparse): models.py = Snapshot dataclasses,
-                    #   collect.py = collect from DDS + views (group_by_topic, endpoints_by_participant, participant_ips) + save/load
+  discovery/        # discovery logic (no argparse):
+                    #   models.py   = Snapshot dataclasses (the raw facts)
+                    #   collect.py  = DDS -> Snapshot (the only discovery module that touches DDS)
+                    #   analysis.py = Snapshot -> views (group_by_topic, endpoints_by_participant, participant_ips)
+                    #   persistance.py = Snapshot <-> JSON in outputs/ (save_snapshot, load_snapshot)
   dds.py            # shared DDS setup (init_dds, make_participant)
   outputs.py        # paths for saved files (outputs/<group>/<date>/...)
   constants.py      # defaults (DDS_DEFAULTS) and paths (BRIDGE_ROOT, OUTPUT_DIR)

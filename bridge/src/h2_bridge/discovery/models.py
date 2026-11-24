@@ -1,7 +1,6 @@
 """Data model for one discovery run.
 
 A Snapshot holds plain facts about what was seen on the DDS network.
-It does no grouping or interpretation; that happens later, in analysis code.
 Keeping the raw facts means a snapshot recorded on the robot can be
 re-analyzed later on any machine.
 """
@@ -45,8 +44,8 @@ class Snapshot:
 
     taken_at: str  # ISO 8601 timestamp of when the run started
     host: str  # machine the run happened on
-    iface: str
-    domain: int
+    interface: str  # network interface it listened on, e.g. "eth10"
+    domain_id: int  # DDS domain ID it listened on
     duration_s: float
     participants: list[Participant] = field(default_factory=list)
     endpoints: list[Endpoint] = field(default_factory=list)
