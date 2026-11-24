@@ -83,15 +83,38 @@ uv run h2-doctor discovery show --list                 # every saved snapshot
 
 `uv run h2-doctor discovery show -h` prints the same views and examples.
 
-### `telemetry`: the robot's live data (scaffold)
+### `telemetry`: the robot's live data
 
-The commands exist so you can see the shape, but each one currently prints "not implemented yet" and exits with `1`.
+`watch` is built; `record` and `replay` still print "not implemented yet" and exit with `1`.
 
 ```bash
-uv run h2-doctor telemetry watch rt/lf/lowstate   # print one topic as messages arrive
-uv run h2-doctor telemetry record                 # save telemetry to outputs/telemetry/<date>/
-uv run h2-doctor telemetry replay FILE            # play a recording back
+uv run h2-doctor telemetry watch                  # live overview, redrawn ~4x a second, until Ctrl-C
+uv run h2-doctor telemetry watch rt/lf/lowstate   # every value of one topic, live
+uv run h2-doctor telemetry watch -t 30            # stop after 30 s
 ```
+
+`watch` subscribes (read-only) to a fixed list of topics, `CORE_TOPICS` in `src/h2_bridge/telemetry/layout.py`, and shows one of two views.
+
+**Overview** (no topic given): one row per topic.
+
+| Column | Meaning |
+|---|---|
+| Hz | measured rate / expected rate. Green: at least 80% of expected. Yellow: slow. Red: silent. |
+| Last | seconds since the topic's newest message |
+| Summary | a few key fields of the newest message. A `?` marks a unit that is likely but unconfirmed (see the MVP's `docs/field_map.md`). |
+
+**One topic** (`watch TOPIC`): subscribes to that topic only and shows every value of its newest message, the raw data with no interpretation:
+- a status line: type, measured / expected Hz, time since the last message, dropped count;
+- a **Field | Value** list of plain fields; nested ones are flattened with dots (`imu_state.rpy`);
+- a table per list of sub-messages, one row per slot (`motor_state`, `press_sensor_state`). Joint and finger slots are named from `layout.py`; slots past the named ones show `(unused)`.
+
+It works for any message type without knowing it. `rt/lf/lowstate` and the hands are about 55 lines tall, so make the terminal tall enough; otherwise the bottom is cut off. `TOPIC` must be one of the 6 core topics (a typo gets "Did you mean").
+
+The 6 topics, about 280 messages/s in total, are what the dashboard draws: `rt/lf/lowstate` (body, 20 Hz), `rt/lf/secondary_imu` (torso IMU), `rt/lf/bmsstate` (battery), `rt/lf/mainboardstate` (board temperatures, fans), `rt/dex5/left/state` and `rt/dex5/right/state` (hands, 100 Hz).
+
+**Why only these topics.** Every message costs Python time to decode, even on a background thread. Subscribing to everything, including the ~1 kHz `rt/lowstate` and `rt/lowcmd`, overloads Python and makes the rates read low (the MVP saw `rt/lf/*` at 10 Hz instead of 20). So `watch` uses the 20 Hz `rt/lf/...` copies and leaves the fast topics out. The caption shows how many messages were **dropped**; if that isn't 0, the display fell behind and its numbers can't be trusted.
+
+**How the data flows.** A *source* hands out every message; each consumer keeps what it needs. `watch` counts every message for the rates and keeps only the newest per topic for the screen. A future recorder will keep all of them. The source is the robot today (`LiveSource`); a `ReplaySource` that reads recordings will plug into the same place.
 
 ### Saved files
 
@@ -107,7 +130,8 @@ The time is when the run started. The interface in the name tells robot runs (`e
 ### Output and exit codes
 
 - Results (tables) go to **stdout**. Spinners and messages go to **stderr**, so `> file` or `| less` only captures the results.
-- Exit codes: `0` success, `1` ran but found nothing, `2` bad arguments, `130` stopped with Ctrl-C.
+- Exit codes: `0` success, `1` ran but found nothing (e.g. `watch` received no data), `2` bad arguments, `130` stopped with Ctrl-C.
+- `telemetry watch` redraws a live table in a terminal. Piped or redirected, it prints only the final table.
 
 ### Code layout
 
@@ -118,12 +142,21 @@ src/h2_bridge/
   cli/cli.py        # root parser + global options; registers each group
   cli/discovery.py  # `discovery` commands  ->  calls h2_bridge.discovery
   cli/discovery_tables.py  # rich tables those commands print (one per kind of row)
-  cli/telemetry.py  # `telemetry` commands (scaffold, will call h2_bridge.telemetry)
+  cli/telemetry.py  # `telemetry` commands  ->  calls h2_bridge.telemetry
+  cli/telemetry_tables.py  # rich tables those commands print
   discovery/        # discovery logic (no argparse):
                     #   models.py   = Snapshot dataclasses (the raw facts)
                     #   collect.py  = DDS -> Snapshot (the only discovery module that touches DDS)
                     #   analysis.py = Snapshot -> views (group_by_topic, endpoints_by_participant, participant_ips)
                     #   persistence.py = Snapshot <-> JSON in outputs/ (save_snapshot, load_snapshot)
+  telemetry/        # telemetry logic (no argparse):
+                    #   models.py   = TopicSpec (a topic we read) and Message (one received message)
+                    #   layout.py   = robot facts: CORE_TOPICS (SDK class, expected Hz), joint/finger slots, array sizes
+                    #   sources/base.py = Source (the shared interface) and latest()
+                    #   sources/live.py = LiveSource: the robot over DDS (the only telemetry module that touches DDS)
+                    #   convert.py  = SDK message -> plain dict
+                    #   rates.py    = RateMeter: Hz per topic from message arrival times
+                    #   summary.py  = one-line summary per message type, for watch
   dds.py            # shared DDS setup (init_dds, make_participant)
   outputs.py        # paths for saved files (outputs/<group>/<date>/...)
   constants.py      # defaults (DDS_DEFAULTS) and paths (BRIDGE_ROOT, OUTPUT_DIR)
@@ -133,4 +166,4 @@ To add a group, create `cli/<group>.py` with a `register(commands)` function and
 
 ### Planned
 
-Not built yet: the logic behind `telemetry watch|record|replay`, `serve`, and `--json` output.
+Not built yet: `telemetry record|replay` (and `--replay FILE` for `watch`), `serve` for the dashboard, `check` (a health sweep of every topic), and `--json` output.
