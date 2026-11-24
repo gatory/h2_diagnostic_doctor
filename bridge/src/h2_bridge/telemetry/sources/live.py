@@ -1,42 +1,34 @@
-"""LiveSource: messages from the robot over DDS. READ-ONLY: it only subscribes.
+"""LiveSource: messages from the robot over DDS. Read-only: it only subscribes.
 
-How a message gets from the robot to poll():
+    DDS thread    our handler stamps the arrival time and drops the message in the inbox
+    main thread   poll() empties the inbox and converts each message to a dict
 
-    DDS thread    the SDK decodes it and calls our handler, which only stamps the
-                  arrival time and drops it in the mailbox (_pending). Nothing slow
-                  here: while the handler runs, newer messages can be overwritten.
-    main thread   poll() empties the mailbox and converts each message to a dict.
-
-A lock guards the mailbox because both threads touch it. The mailbox has a size
-limit: if the main thread falls far behind, the oldest messages are thrown away
-and counted in `dropped`, instead of using up memory.
-
-Cost: every message is decoded and converted, so subscribe only to what you need
-(~300 messages/s is fine; adding the ~1 kHz topics like rt/lowstate is not).
+The handler must stay tiny, or DDS overwrites messages before we take them.
+The inbox is capped; overflow drops the oldest and counts it in `dropped`.
 """
 
+import dataclasses
+import math
 import threading
 import time
 from collections import deque
 
-from h2_bridge.telemetry.convert import to_dict
 from h2_bridge.telemetry.models import Message
 from h2_bridge.telemetry.sources.base import Source
 
 
 class LiveSource(Source):
-    """Subscribe to `topics` ({name: TopicSpec}) on the robot's DDS network."""
+    """`topics` ({name: TopicSpec}, e.g. CORE_TOPICS) on `interface` / `domain_id`."""
 
     live = True
 
     def __init__(self, interface, domain_id, topics, max_pending=10_000):
+        super().__init__(topics)
         self.interface = interface
         self.domain_id = domain_id
-        self.topics = dict(topics)
-        self.dropped = {name: 0 for name in self.topics}
-        self._max_pending = max_pending  # ~30 s of watch's topics
-        self._pending = deque()  # the mailbox: (arrival time, topic, SDK message)
-        self._lock = threading.Lock()
+        self._max_pending = max_pending  # ~30 s of all core topics
+        self._inbox = deque()  # (arrival time, topic, SDK message)
+        self._lock = threading.Lock()  # the DDS thread and poll() both touch the inbox
         self._subscribers = []
 
     def start(self):
@@ -47,29 +39,42 @@ class LiveSource(Source):
         init_dds(self.interface, self.domain_id)
         for name, spec in self.topics.items():
             sub = ChannelSubscriber(name, spec.msg_type)
-            sub.Init(self._make_handler(name))  # no queueLen: the handler runs on DDS's thread
+            sub.Init(self._make_handler(name))  # no queueLen: runs on DDS's own thread
             self._subscribers.append(sub)
         return self
 
     def _make_handler(self, topic):
-        """Build the callback for one topic (the SDK passes only the message, not its topic)."""
+        """Callback for one topic (the SDK passes only the message, not its topic)."""
 
-        def handle(msg):  # runs on a DDS thread: keep it tiny
+        def handle(msg):  # DDS thread: keep it tiny
             arrived = time.time()
             with self._lock:
-                if len(self._pending) >= self._max_pending:
-                    _, lost_topic, _ = self._pending.popleft()
-                    self.dropped[lost_topic] += 1
-                self._pending.append((arrived, topic, msg))
+                if len(self._inbox) >= self._max_pending:
+                    _, lost, _ = self._inbox.popleft()
+                    self.dropped[lost] += 1
+                self._inbox.append((arrived, topic, msg))
 
         return handle
 
     def poll(self):
-        with self._lock:  # swap the mailbox for an empty one; hold the lock as briefly as possible
-            pending, self._pending = self._pending, deque()
-        return [Message(t, topic, to_dict(msg)) for t, topic, msg in pending]
+        with self._lock:  # swap in an empty inbox; hold the lock briefly
+            inbox, self._inbox = self._inbox, deque()
+        return [Message(t, topic, _to_dict(msg)) for t, topic, msg in inbox]
 
     def close(self):
         subscribers, self._subscribers = self._subscribers, []
         for sub in subscribers:
             sub.Close()
+
+
+def _to_dict(obj):
+    """SDK message -> plain JSON-safe data (dicts, lists, numbers; NaN/inf -> None)."""
+    if dataclasses.is_dataclass(obj):
+        return {f.name: _to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+    if isinstance(obj, (list, tuple)):
+        return [_to_dict(x) for x in obj]
+    if isinstance(obj, (bytes, bytearray)):
+        return list(obj)
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    return obj
