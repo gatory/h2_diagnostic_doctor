@@ -3,11 +3,12 @@
 Listens to the three DDS built-in discovery topics for a while and records
 what it sees, without grouping or interpreting it (see models.py):
 
-    DCPSParticipant   -> Participant  (one per program, with its properties)
+    DCPSParticipant   -> Participant  (one per DDS connection, with its properties)
     DCPSPublication   -> Endpoint(kind="writer")
     DCPSSubscription  -> Endpoint(kind="reader")
 
-group_by_topic() and save_snapshot() work on a finished Snapshot.
+group_by_topic(), endpoints_by_participant(), participant_ips(), save_snapshot()
+and load_snapshot() work on a finished Snapshot.
 """
 
 import os
@@ -116,7 +117,7 @@ def _is_own(participant):
 
 
 def group_by_topic(snapshot):
-    """Group a Snapshot's endpoints by topic (the view `discovery topics` shows).
+    """Group a Snapshot's endpoints by topic (the summary `discovery topics` and `show` print).
 
     Returns
     -------
@@ -133,6 +134,39 @@ def group_by_topic(snapshot):
         entry["types"].add(e.type_name)
         entry[e.kind + "s"].append(e)  # "writer" -> "writers", "reader" -> "readers"
     return topics
+
+
+def endpoints_by_participant(snapshot):
+    """Group a Snapshot's endpoints by the participant that owns them.
+
+    Returns {participant_key: [Endpoint, ...]}; participants with no endpoints are left out.
+    """
+    owned = {}
+    for e in snapshot.endpoints:
+        owned.setdefault(e.participant_key, []).append(e)
+    return owned
+
+
+def participant_ips(participant):
+    """The unicast IP addresses a participant announced, e.g. ["192.168.123.161"].
+
+    Reads CycloneDDS's __NetworkAddresses property, which looks like
+    "udp/239.255.0.1:7400@3,udp/192.168.123.161:49394@3". Multicast group
+    addresses (224.x to 239.x) are shared by everyone, so they're skipped.
+    Empty if the property is missing (e.g. a non-CycloneDDS program).
+    """
+    ips = []
+    for address in participant.properties.get("__NetworkAddresses", "").split(","):
+        # "udp/192.168.123.161:49394@3" -> "192.168.123.161"
+        if "/" not in address or ":" not in address:
+            continue
+        ip = address.split("/", 1)[1].rsplit(":", 1)[0]
+        first_octet = ip.split(".")[0]
+        if first_octet.isdigit() and 224 <= int(first_octet) <= 239:
+            continue
+        if ip not in ips:
+            ips.append(ip)
+    return ips
 
 
 def save_snapshot(snapshot, name="snapshot"):
@@ -153,3 +187,24 @@ def save_snapshot(snapshot, name="snapshot"):
     with open(path, "w") as f:
         json.dump(asdict(snapshot), f, indent=2)
     return path
+
+
+def load_snapshot(path):
+    """Read a Snapshot back from a JSON file written by save_snapshot().
+
+    Raises ValueError if the file isn't a snapshot (wrong JSON shape).
+    """
+    import json
+
+    with open(path) as f:
+        data = json.load(f)
+
+    try:
+        return Snapshot(
+            # The run info fields (taken_at, host, ...) map 1:1 onto Snapshot's fields.
+            **{k: v for k, v in data.items() if k not in ("participants", "endpoints")},
+            participants=[Participant(**p) for p in data["participants"]],
+            endpoints=[Endpoint(**e) for e in data["endpoints"]],
+        )
+    except (KeyError, TypeError) as e:  # missing or unexpected fields
+        raise ValueError(f"{path} is not a discovery snapshot: {e}") from None
