@@ -34,7 +34,7 @@ These go **before** the group name, e.g. `h2-doctor --iface eth0 discovery topic
 | `--domain N`    | `0`     | DDS domain ID              |
 | `--version`     |         | Print the version and exit |
 
-Defaults live in `DDS_DEFAULTS` in `src/h2_bridge/model.py`. Edit that file to change them permanently.
+Defaults live in `DDS_DEFAULTS` in `src/h2_bridge/constants.py`. Edit that file to change them permanently.
 
 ### `discovery`: what's on the DDS network
 
@@ -42,24 +42,41 @@ Defaults live in `DDS_DEFAULTS` in `src/h2_bridge/model.py`. Edit that file to c
 
 | Option                     | Default | Meaning                                  |
 | -------------------------- | ------- | ---------------------------------------- |
-| `-t SECS`, `--duration SECS` | `10`    | Seconds to listen for publishers         |
+| `-t SECS`, `--duration SECS` | `10`    | Seconds to listen (longer catches programs that announce slowly) |
 | `-s [NAME]`, `--save [NAME]` |         | Also save the full snapshot (participants, endpoints, QoS) to `outputs/`, optionally named NAME (default: `snapshot`) |
 
 ```bash
 uv run h2-doctor discovery topics                     # listen 10s, print a table
 uv run h2-doctor discovery topics --save              # also save to outputs/discovery/<date>/
 uv run h2-doctor discovery topics -t 5 --save         # listen 5s, then save
-uv run h2-doctor discovery topics --save [custome_file_name]  # → outputs/discovery/<date>/custome_file_name_<time>_<iface>.json
+uv run h2-doctor discovery topics --save before_walk  # → outputs/discovery/<date>/before_walk_<time>_<iface>.json
 ```
 
-`h2-doctor discovery show` reads a saved snapshot from `outputs/discovery/` and prints the same table, with a line saying when, where and how long it was taken. It needs no robot or network, so it works on your laptop after copying `outputs/` over.
+`h2-doctor discovery show` reads a snapshot saved with `--save` from `outputs/discovery/` and prints it, starting with a line saying when, where and how long it was taken. It needs no robot or network, so it works on your laptop after copying `outputs/` over (e.g. with `rsync` or `scp` from the Thor).
+
+**Which snapshot:** give no name for the newest, a saved name (`before_walk`) for the newest with that name, or a full file name without `.json` (`snapshot_155001_eth10`) for one exact file.
+
+**Which view:** each view is named after what one row is. Pick one at a time:
+
+| Option | One row per | Columns |
+| ------ | ----------- | ------- |
+| *(none)* | topic | Topic, Message Type, Writers, Readers (the summary) |
+| `-p`, `--participants` | participant (one DDS connection a program opened) | Participants (ID), Process, PID, Host, IP, Writers, Readers |
+| `-e TOPIC`, `--endpoints TOPIC` | endpoint (writer or reader) of that topic | Kind, Participants (ID), Process, PID, Host, IP, Reliability, Durability, Type info |
+| `-l`, `--list` | saved snapshot file, newest first | Date, Time, Name, Interface, File |
+
+`--participants` and `--endpoints` share the same owner columns (Participants … IP), so a row in one can be matched to the other by its ID. A misspelled `--endpoints` topic suggests close matches.
 
 ```bash
-uv run h2-doctor discovery show                        # newest saved snapshot
+uv run h2-doctor discovery show                        # newest snapshot, per-topic summary
 uv run h2-doctor discovery show before_walk            # newest snapshot saved as `--save before_walk`
-uv run h2-doctor discovery show snapshot_155001_eth10  # one exact file (name without .json)
-uv run h2-doctor discovery show --list                 # table of all saved snapshots
+uv run h2-doctor discovery show snapshot_155001_eth10  # one exact file
+uv run h2-doctor discovery show --participants         # who is on the network
+uv run h2-doctor discovery show --endpoints rt/lowcmd  # who writes and reads rt/lowcmd
+uv run h2-doctor discovery show --list                 # every saved snapshot
 ```
+
+`uv run h2-doctor discovery show -h` prints the same views and examples.
 
 ### `telemetry`: the robot's live data (scaffold)
 
@@ -96,14 +113,15 @@ src/h2_bridge/
   cli/cli.py        # root parser + global options; registers each group
   cli/discovery.py  # `discovery` commands  ->  calls h2_bridge.discovery
   cli/telemetry.py  # `telemetry` commands (scaffold, will call h2_bridge.telemetry)
-  discovery/        # discovery logic (no argparse): models.py = Snapshot dataclasses, collect.py = collect + group + save
+  discovery/        # discovery logic (no argparse): models.py = Snapshot dataclasses,
+                    #   collect.py = collect from DDS + views (group_by_topic, endpoints_by_participant, participant_ips) + save/load
   dds.py            # shared DDS setup (init_dds, make_participant)
   outputs.py        # paths for saved files (outputs/<group>/<date>/...)
-  model.py          # defaults (DDS_DEFAULTS)
+  constants.py      # defaults (DDS_DEFAULTS) and paths (BRIDGE_ROOT, OUTPUT_DIR)
 ```
 
 To add a group, create `cli/<group>.py` with a `register(commands)` function and call it from `build_parser()` in `cli/cli.py`.
 
 ### Planned
 
-Not built yet: the logic behind `telemetry watch|record|replay`, `discovery snapshot`, `serve`, and `--json` output.
+Not built yet: the logic behind `telemetry watch|record|replay`, `serve`, and `--json` output.
