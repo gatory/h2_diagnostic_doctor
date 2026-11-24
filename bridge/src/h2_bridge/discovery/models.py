@@ -14,7 +14,12 @@ EndpointKind = Literal["writer", "reader"]
 
 @dataclass
 class Participant:
-    """One DDS participant, roughly one program on the network."""
+    """One DDS participant: one connection a program opened to the DDS network.
+
+    Usually one per program, but a program can open several participants.
+    Its properties say which program (process name, PID) and which
+    computer (hostname, IP) it belongs to.
+    """
 
     key: str
     # Extra identifying info some programs attach to their QoS (may be empty).
