@@ -3,7 +3,7 @@
 JSON Lines, one object per line: a header first, then every message in arrival order.
 
     {"recording": 1, "started": "2026-11-24T15:01:02", "interface": "eth10", "domain_id": 0,
-     "topics": {"rt/lf/lowstate": {"type": "unitree_hg.msg.dds_.LowState_", "expected_hz": 20.0, "feeds": "..."}}}
+     "topics": {"rt/lf/lowstate": {"type": "unitree_hg.msg.dds_.LowState_", "expected_hz": 20.0}}}
     {"t": 1764000062.12, "topic": "rt/lf/lowstate", "data": {...}}
 
 Files live in outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl (via utils/outputs.py).
@@ -37,7 +37,7 @@ class RecordingWriter:
             "interface": source.interface,
             "domain_id": source.domain_id,
             "topics": {
-                name: {"type": spec.msg_type.__idl_typename__, "expected_hz": spec.expected_hz, "feeds": spec.feeds}
+                name: {"type": spec.msg_type.__idl_typename__, "expected_hz": spec.expected_hz}
                 for name, spec in source.topics.items()
             },
         }
@@ -64,7 +64,7 @@ def read_header(file):
     if not isinstance(header, dict) or header.get("recording") != FORMAT_VERSION:
         raise ValueError(f"{file.name}: not an h2-doctor recording (version {FORMAT_VERSION})")
     topics = {
-        name: TopicSpec(_sdk_class(info["type"]), info["expected_hz"], info.get("feeds", ""))
+        name: TopicSpec(name, _sdk_class(info["type"]), info["expected_hz"])
         for name, info in header["topics"].items()
     }
     return header, topics

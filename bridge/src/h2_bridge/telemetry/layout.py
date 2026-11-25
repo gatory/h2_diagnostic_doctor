@@ -23,14 +23,15 @@ from h2_bridge.telemetry.models import TopicSpec
 
 # ---------------------------------------------------------------- Topics
 # Note uses low frequency copy for better computation optimization
-CORE_TOPICS = {
-    "rt/lf/lowstate": TopicSpec(LowState_, 20.0, "body: 31 joints, pelvis IMU"),
-    "rt/lf/secondary_imu": TopicSpec(IMUState_, 20.0, "torso IMU (above the waist)"),
-    "rt/lf/bmsstate": TopicSpec(BmsState_, 20.0, "battery"),
-    "rt/lf/mainboardstate": TopicSpec(MainBoardState_, 20.0, "main board temperatures, fans"),
-    "rt/dex5/left/state": TopicSpec(HandState_, 100.0, "left hand: motors, pressure pads"),
-    "rt/dex5/right/state": TopicSpec(HandState_, 100.0, "right hand: motors, pressure pads"),
-}
+_CORE = [
+    TopicSpec("rt/lf/lowstate", LowState_, 20.0),  # body: 31 joints, pelvis IMU
+    TopicSpec("rt/lf/secondary_imu", IMUState_, 20.0),  # torso IMU (above the waist)
+    TopicSpec("rt/lf/bmsstate", BmsState_, 20.0),  # battery
+    TopicSpec("rt/lf/mainboardstate", MainBoardState_, 20.0),  # main board temperatures, fans
+    TopicSpec("rt/dex5/left/state", HandState_, 100.0),  # left hand: motors, pressure pads
+    TopicSpec("rt/dex5/right/state", HandState_, 100.0),  # right hand: motors, pressure pads
+]
+CORE_TOPICS = {spec.name: spec for spec in _CORE}  # name -> TopicSpec
 
 # ---------------------------------------------------------------- Body (rt/lf/lowstate)
 # Row i is LowState_.motor_state[i]. LowState_ has 35 slots; only 0..30 are used.
