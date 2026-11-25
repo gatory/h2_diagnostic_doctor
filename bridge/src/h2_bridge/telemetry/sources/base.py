@@ -26,12 +26,12 @@ class Source(ABC):
         True for the robot, False for a recording.
     topics : dict[str, TopicSpec]
         The topics this source delivers.
+    done : bool
+        True once the source has nothing more to give (a recording's end). A live source never is.
     """
 
-    @property
-    @abstractmethod
-    def live(self):
-        """True for the robot, False for a recording."""
+    live: bool
+    done = False
 
     def __init__(self, topics):
         """topics: {name: TopicSpec} this source delivers."""
