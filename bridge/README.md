@@ -154,12 +154,14 @@ src/h2_bridge/
                     #   layout.py   = robot facts: CORE_TOPICS (SDK class, expected Hz), joint/finger slots, array sizes
                     #   sources/base.py = Source (the shared interface) and latest()
                     #   sources/live.py = LiveSource: the robot over DDS (the only telemetry module that touches DDS)
+                    #   resolve.py  = topic names -> TopicSpecs (core instantly, others via a short discovery run)
                     #   rates.py    = RateMeter: Hz per topic from message arrival times
                     #   summary.py  = one-line summary per message type, for watch
   dds.py            # shared DDS setup (init_dds, make_participant)
   utils/            # small shared helpers (no DDS, no argparse):
                     #   convert.py = SDK message -> plain dict (msg_to_dict)
                     #   outputs.py = paths for saved files (outputs/<group>/<date>/...)
+                    #   sdk_types.py = DDS type name -> SDK class (lookup_type)
   constants.py      # defaults (DDS_DEFAULTS) and paths (BRIDGE_ROOT, OUTPUT_DIR)
 ```
 

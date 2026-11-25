@@ -9,11 +9,11 @@ JSON Lines, one object per line: a header first, then every message in arrival o
 Files live in outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl (via utils/outputs.py).
 """
 
-import importlib
 import json
 from datetime import datetime
 
 from h2_bridge.telemetry.models import Message, TopicSpec
+from h2_bridge.utils.sdk_types import lookup_type
 
 FORMAT_VERSION = 1
 
@@ -78,8 +78,7 @@ def read_message(line):
 
 def _sdk_class(type_name):
     """"unitree_hg.msg.dds_.LowState_" -> the SDK's LowState_ class."""
-    module_name, _, class_name = type_name.rpartition(".")
-    try:
-        return getattr(importlib.import_module(f"unitree_sdk2py.idl.{module_name}"), class_name)
-    except (ImportError, AttributeError):
-        raise ValueError(f"recording uses type {type_name!r}, which this SDK doesn't have") from None
+    cls = lookup_type(type_name)
+    if cls is None:
+        raise ValueError(f"recording uses type {type_name!r}, which this SDK doesn't have")
+    return cls
