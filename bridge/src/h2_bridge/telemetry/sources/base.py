@@ -13,19 +13,28 @@ class TopicError(ValueError):
 
 class Source(ABC):
     """Base class for message sources.
+    
+    Note
+    ----
+    Subclasses must call super().__init__(topics), set `live`, and implement poll()
+    (plus start()/close() if they hold resources).
 
+    
     Attributes
     ----------
     live : bool
         True for the robot, False for a recording.
     topics : dict[str, TopicSpec]
-        The topics this source subscribes to.
+        The topics this source delivers.
     """
 
-    live: bool
+    @property
+    @abstractmethod
+    def live(self):
+        """True for the robot, False for a recording."""
 
     def __init__(self, topics):
-        """Stores what topics any source is subscribed to"""
+        """topics: {name: TopicSpec} this source delivers."""
         self.topics = dict(topics)
 
     def start(self):
