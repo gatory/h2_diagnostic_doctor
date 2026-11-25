@@ -7,18 +7,20 @@ The handler must stay tiny, or DDS overwrites messages before we take them.
 The inbox is capped; overflow drops the oldest and counts it in `dropped`.
 """
 
-import dataclasses
-import math
 import threading
 import time
 from collections import deque
 
 from h2_bridge.telemetry.models import Message
-from h2_bridge.telemetry.sources.base import Source
+from h2_bridge.telemetry.sources.base import Source, TopicError
+from h2_bridge.utils.convert import msg_to_dict
 
 
 class LiveSource(Source):
-    """`topics` ({name: TopicSpec}, e.g. CORE_TOPICS) on `interface` / `domain_id`."""
+    """`topics` ({name: TopicSpec}, e.g. CORE_TOPICS) on `interface` / `domain_id`.
+
+    `dropped` ({topic: count}) counts messages lost because poll() fell behind. Should stay 0.
+    """
 
     live = True
 
@@ -26,6 +28,7 @@ class LiveSource(Source):
         super().__init__(topics)
         self.interface = interface
         self.domain_id = domain_id
+        self.dropped = dict.fromkeys(self.topics, 0)
         self._max_pending = max_pending  # ~30 s of all core topics
         self._inbox = deque()  # (arrival time, topic, SDK message)
         self._lock = threading.Lock()  # the DDS thread and poll() both touch the inbox
@@ -37,10 +40,17 @@ class LiveSource(Source):
         from h2_bridge.dds import init_dds
 
         init_dds(self.interface, self.domain_id)
-        for name, spec in self.topics.items():
-            sub = ChannelSubscriber(name, spec.msg_type)
-            sub.Init(self._make_handler(name))  # no queueLen: runs on DDS's own thread
-            self._subscribers.append(sub)
+        try:
+            for name, spec in self.topics.items():
+                try:
+                    sub = ChannelSubscriber(name, spec.msg_type)
+                    sub.Init(self._make_handler(name))  # no queueLen: runs on DDS's own thread
+                except Exception as e:
+                    raise TopicError(f"can't subscribe to {name!r} ({spec.msg_type.__name__}): {e}") from e
+                self._subscribers.append(sub)
+        except Exception:
+            self.close()
+            raise
         return self
 
     def _make_handler(self, topic):
@@ -59,22 +69,9 @@ class LiveSource(Source):
     def poll(self):
         with self._lock:  # swap in an empty inbox; hold the lock briefly
             inbox, self._inbox = self._inbox, deque()
-        return [Message(t, topic, _to_dict(msg)) for t, topic, msg in inbox]
+        return [Message(t, topic, msg_to_dict(msg)) for t, topic, msg in inbox]
 
     def close(self):
         subscribers, self._subscribers = self._subscribers, []
         for sub in subscribers:
             sub.Close()
-
-
-def _to_dict(obj):
-    """SDK message -> plain JSON-safe data (dicts, lists, numbers; NaN/inf -> None)."""
-    if dataclasses.is_dataclass(obj):
-        return {f.name: _to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
-    if isinstance(obj, (list, tuple)):
-        return [_to_dict(x) for x in obj]
-    if isinstance(obj, (bytes, bytearray)):
-        return list(obj)
-    if isinstance(obj, float) and not math.isfinite(obj):
-        return None
-    return obj

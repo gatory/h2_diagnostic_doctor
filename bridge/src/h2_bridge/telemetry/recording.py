@@ -6,7 +6,7 @@ JSON Lines, one object per line: a header first, then every message in arrival o
      "topics": {"rt/lf/lowstate": {"type": "unitree_hg.msg.dds_.LowState_", "expected_hz": 20.0, "feeds": "..."}}}
     {"t": 1764000062.12, "topic": "rt/lf/lowstate", "data": {...}}
 
-Files live in outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl (via outputs.py).
+Files live in outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl (via utils/outputs.py).
 """
 
 import importlib
@@ -26,7 +26,7 @@ class RecordingWriter:
     """
 
     def __init__(self, source, name="recording"):
-        from h2_bridge.outputs import output_path
+        from h2_bridge.utils.outputs import output_path
 
         started = datetime.now()
         self.path = output_path("telemetry", name, source.interface, when=started, ext="jsonl")
