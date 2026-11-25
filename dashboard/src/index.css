@@ -1,7 +1,23 @@
+/* Tokens from tesla.design.md: white canvas, neutral inks, no shadows or gradients. */
 :root {
-  font-family: system-ui, sans-serif;
-  color: #d8dadc;
-  background: #15171a;
+  --primary: #3e6ae1; /* primary buttons only */
+  --canvas: #ffffff;
+  --surface-soft: #f4f4f4;
+  --ink: #171a20;
+  --body: #393c41;
+  --muted: #5c5e62;
+  --placeholder: #8e8e8e;
+  --hairline: #eeeeee;
+  --border-strong: #d0d1d2;
+  --frost: rgba(255, 255, 255, 0.75);
+  --radius-xs: 4px;
+
+  font-family: Inter, -apple-system, system-ui, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.43;
+  color: var(--body);
+  background: var(--canvas);
 }
 
 html,
@@ -17,15 +33,54 @@ body,
   height: 100%;
 }
 
-header {
-  padding: 10px 16px;
-  font-weight: 600;
-  border-bottom: 1px solid #2a2d31;
+.top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 32px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.wordmark {
+  letter-spacing: 0.3em;
+}
+
+.nav-status {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.stage {
+  position: relative;
+  min-height: 0;
+}
+
+.hero {
+  position: absolute;
+  top: 48px;
+  left: 32px;
+  pointer-events: none;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.hero p {
+  margin: 4px 0 0;
+  color: var(--muted);
 }
 
 .robot-view {
-  position: relative;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
 }
 
@@ -34,9 +89,72 @@ header {
   inset: 0;
   display: grid;
   place-items: center;
+  color: var(--muted);
   pointer-events: none;
 }
 
 .overlay.error {
-  color: #ff7b72;
+  color: var(--ink);
+}
+
+/* Metric markers (src/robot/markers.ts), drawn by three's CSS2DRenderer over the canvas. */
+.marker-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none; /* let drags reach the orbit controls */
+}
+
+.marker {
+  width: 0;
+  height: 0;
+}
+
+.marker-dot {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.marker-line {
+  position: absolute;
+  top: 0;
+  width: 56px;
+  height: 1px;
+  background: var(--ink);
+}
+
+.marker-card {
+  position: absolute;
+  top: 0;
+  transform: translateY(-50%);
+  padding: 8px 12px;
+  white-space: nowrap;
+  background: var(--frost);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-xs);
+}
+
+.marker[data-side='right'] .marker-line { left: 4px; }
+.marker[data-side='right'] .marker-card { left: 64px; }
+.marker[data-side='left'] .marker-line { right: 4px; }
+.marker[data-side='left'] .marker-card { right: 64px; text-align: right; }
+
+.marker-title {
+  color: var(--muted);
+}
+
+.marker-value {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.18;
+  color: var(--ink);
+}
+
+.marker-detail {
+  color: var(--muted);
 }
