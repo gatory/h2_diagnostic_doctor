@@ -90,6 +90,10 @@ class LiveSource(Source):
             inbox, self._inbox = self._inbox, deque()
         return [Message(t, topic, msg_to_dict(msg)) for t, topic, msg in inbox]
 
+    def now(self):
+        """Wall-clock time, the same clock the handler stamps arrivals with."""
+        return time.time()
+
     def close(self):
         """Unsubscribe from every topic. Safe to call twice."""
         subscribers, self._subscribers = self._subscribers, []

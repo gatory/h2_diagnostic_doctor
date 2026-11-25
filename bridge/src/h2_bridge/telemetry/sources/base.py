@@ -17,7 +17,7 @@ class Source(ABC):
     Note
     ----
     Subclasses must call super().__init__(topics), set `live`, and implement poll()
-    (plus start()/close() if they hold resources).
+    and now() (plus start()/close() if they hold resources).
 
     
     Attributes
@@ -44,6 +44,13 @@ class Source(ABC):
     @abstractmethod
     def poll(self):
         """Return every Message received since the last call, oldest first (may be empty)."""
+
+    @abstractmethod
+    def now(self):
+        """Current time on this source's clock, in the same units as Message.t.
+
+        Use it instead of time.time() for ages and rates, so they work on a replay too.
+        """
 
     def close(self):
         """Stop receiving and release resources. Safe to call twice."""
