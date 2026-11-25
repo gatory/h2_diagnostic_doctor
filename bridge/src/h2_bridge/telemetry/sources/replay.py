@@ -4,13 +4,19 @@ poll() returns every message whose time has come, keeping the recording's
 original gaps (scaled by `speed`) and its original timestamps. now() runs on
 the recording's clock, so ages and rates measured on a replay match the live
 run. The file is read line by line, so long recordings don't have to fit in memory.
+Reads gzipped (.jsonl.gz) and plain (.jsonl) recordings.
 """
 
 import difflib
+import gzip
 import json
 import time
+import zlib
 
-from h2_bridge.telemetry.recording import read_header, read_message
+from h2_bridge.telemetry.recording import open_recording, read_header, read_line
+
+# What reading a gzip file that was cut off (recorder killed mid-write) raises.
+_CUT_OFF = (EOFError, zlib.error, gzip.BadGzipFile)
 from h2_bridge.telemetry.sources.base import Source, TopicError
 
 
@@ -25,7 +31,10 @@ class ReplaySource(Source):
     done : bool
         True once every message has been handed out.
     truncated : bool
-        True if the last line was cut off (recording killed mid-write); it is skipped.
+        True if the file was cut off (recording killed mid-write); the cut-off part is skipped.
+    footer : dict | None
+        The recording's footer (end, duration_s, messages, dropped) once it's reached;
+        stays None if the recorder died before writing it.
     """
 
     live = False
@@ -37,8 +46,9 @@ class ReplaySource(Source):
         self.speed = speed
         self.done = False
         self.truncated = False
+        self.footer = None
         self._started = None
-        self._file = open(path, encoding="utf-8")
+        self._file = open_recording(path)
         try:
             self.header, recorded = read_header(self._file)
             super().__init__(_select_topics(recorded, topics))  # TopicError if not recorded
@@ -47,6 +57,7 @@ class ReplaySource(Source):
             self._file.close()  # bad file or topic: don't leak the handle
             raise
         self._first_t = None if self._next is None else self._next.t
+        self._last_t = self._first_t  # newest message handed out so far
 
     def start(self):
         """Start the playback clock. Calling it again does nothing."""
@@ -61,32 +72,55 @@ class ReplaySource(Source):
         due = []
         while self._next is not None and self._next.t <= end:
             due.append(self._next)
+            self._last_t = self._next.t
             self._next = self._read_next()
         if self._next is None:
             self.done = True
         return due
 
     def now(self):
-        """Where playback is, in recording time (same units as Message.t)."""
+        """Where playback is, in recording time (same units as Message.t).
+
+        Stops at the last message once the recording is done, so the final
+        state shows as the recording ended, not as gone stale.
+        """
         if self._first_t is None:  # empty recording
             return 0.0
         if self._started is None:
             return self._first_t
+        if self.done:
+            return self._last_t
         return self._first_t + (time.monotonic() - self._started) * self.speed
 
     def _read_next(self):
-        """Next message on one of our topics, or None at the end of the file."""
-        for line in self._file:
+        """Next message on one of our topics, or None at the end (file end, footer, or cut-off)."""
+        while True:
             try:
-                message = read_message(line)
+                line = next(self._file, None)
+            except _CUT_OFF:  # gzip stream ends mid-way: everything before it was read
+                self.truncated = True
+                return None
+            if line is None:
+                return None
+            try:
+                record = read_line(line)
             except json.JSONDecodeError:
-                if self._file.read().strip():  # more after it: real corruption
+                if not self._rest_is_empty():  # more after it: real corruption
                     raise
                 self.truncated = True  # cut-off last line: treat as the end
                 return None
-            if message.topic in self.topics:
-                return message
-        return None
+            if isinstance(record, dict):  # the footer: the recording ends here
+                self.footer = record
+                return None
+            if record.topic in self.topics:
+                return record
+
+    def _rest_is_empty(self):
+        """True if nothing readable follows (a cut-off gzip tail counts as nothing)."""
+        try:
+            return not self._file.read().strip()
+        except _CUT_OFF:
+            return True
 
     def close(self):
         """Close the file. Safe to call twice."""

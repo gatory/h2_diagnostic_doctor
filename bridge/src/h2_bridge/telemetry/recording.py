@@ -1,16 +1,22 @@
 """The recording file format: written by RecordingWriter, read by ReplaySource.
 
-JSON Lines, one object per line: a header first, then every message in arrival order.
+Gzipped JSON Lines, one object per line: a header, every message in arrival
+order, then a footer when the recording closes.
 
     {"recording": 1, "started": "2026-11-24T15:01:02-07:00", "host": "thor", "interface": "eth10",
      "domain_id": 0, "topics": {"rt/lf/lowstate": {"type": "unitree_hg::msg::dds_::LowState_", "expected_hz": 20.0}}}
     {"t": 1764000062.12, "topic": "rt/lf/lowstate", "data": {...}}
+    {"end": "2026-11-24T15:02:03-07:00", "duration_s": 61.0, "messages": 11300, "dropped": {"rt/lf/lowstate": 0}}
 
-Files live in outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl (via utils/outputs.py).
+No footer means the recorder died (power loss, kill -9). Plain .jsonl files
+(made before gzip) are still read. Files live in
+outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl.gz (via utils/outputs.py).
 """
 
+import gzip
 import json
 import socket
+import time
 from datetime import datetime
 
 from h2_bridge.telemetry.models import Message, TopicSpec
@@ -18,12 +24,19 @@ from h2_bridge.utils.sdk_types import lookup_type
 
 FORMAT_VERSION = 1
 
+# gzip level: 6 shrinks recordings ~10x for ~1% of a core; 9 costs 4x the CPU for ~7% smaller.
+COMPRESS_LEVEL = 6
+
+_GZIP_MAGIC = b"\x1f\x8b"
+
 
 class RecordingWriter:
     """Write every message from a LiveSource to a new recording file.
 
         with LiveSource("eth10", 0, CORE_TOPICS) as source, RecordingWriter(source) as rec:
             rec.write(source.poll())
+
+    close() writes the footer (end time, message count, the source's `dropped`).
 
     Attributes
     ----------
@@ -37,9 +50,12 @@ class RecordingWriter:
         from h2_bridge.utils.outputs import output_path
 
         started = datetime.now().astimezone()
-        self.path = output_path("telemetry", name, source.interface, when=started, ext="jsonl")
+        self.path = output_path("telemetry", name, source.interface, when=started, ext="jsonl.gz")
         self.count = 0
-        self._file = open(self.path, "x", encoding="utf-8")  # "x": never overwrite a recording
+        self._source = source
+        self._started = time.monotonic()
+        # "x": never overwrite a recording
+        self._file = gzip.open(self.path, "xb", compresslevel=COMPRESS_LEVEL)
         header = {
             "recording": FORMAT_VERSION,
             "started": started.isoformat(timespec="seconds"),
@@ -58,21 +74,36 @@ class RecordingWriter:
         for m in messages:
             self._write_line({"t": m.t, "topic": m.topic, "data": m.data})
         self.count += len(messages)
-        self._file.flush()
+        self._file.flush()  # gzip sync flush: everything so far is decodable
 
     def _write_line(self, obj):
-        self._file.write(json.dumps(obj, allow_nan=False, separators=(",", ":")) + "\n")
+        line = json.dumps(obj, allow_nan=False, separators=(",", ":")) + "\n"
+        self._file.write(line.encode("utf-8"))
 
     def close(self):
-        """Close the file. Safe to call twice."""
-        if not self._file.closed:
-            self._file.close()
+        """Write the footer and close the file. Safe to call twice."""
+        if self._file.closed:
+            return
+        self._write_line({
+            "end": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "duration_s": round(time.monotonic() - self._started, 1),
+            "messages": self.count,
+            "dropped": dict(getattr(self._source, "dropped", {})),
+        })
+        self._file.close()
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc_info):
         self.close()
+
+
+def open_recording(path):
+    """Open a recording for reading as text: gzipped or plain, told apart by its first bytes."""
+    with open(path, "rb") as f:
+        gzipped = f.read(2) == _GZIP_MAGIC
+    return gzip.open(path, "rt", encoding="utf-8") if gzipped else open(path, encoding="utf-8")
 
 
 def read_header(file):
@@ -87,9 +118,11 @@ def read_header(file):
     return header, topics
 
 
-def read_message(line):
-    """One message line -> Message."""
+def read_line(line):
+    """One line after the header -> a Message, or the footer as a dict (it has an "end" key)."""
     record = json.loads(line)
+    if "end" in record:
+        return record
     return Message(record["t"], record["topic"], record["data"])
 
 
