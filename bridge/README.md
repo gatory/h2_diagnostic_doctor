@@ -85,31 +85,39 @@ uv run h2-doctor discovery show --list                 # every saved snapshot
 
 ### `telemetry`: the robot's live data
 
-Telemetry is being rebuilt. Today `watch` works with `--quiet` (no live table yet), which is enough to **record**; `replay` still prints "not implemented yet" and exits with `1`.
-
 ```bash
-uv run h2-doctor telemetry watch -q --record                 # record the core topics until Ctrl-C
-uv run h2-doctor telemetry watch -q --record first_try -t 30 # 30 s, saved as first_try_<time>_<iface>.jsonl
-uv run h2-doctor telemetry watch rt/lf/bmsstate -q --record  # only some topics (put TOPICs before --record)
-uv run h2-doctor telemetry watch rt/odommodestate -q -t 10   # any topic: non-core ones are found by discovery (~2 s)
+uv run h2-doctor telemetry watch                             # live overview of the core topics until Ctrl-C
+uv run h2-doctor telemetry watch rt/lf/lowstate              # every value of one topic, live
+uv run h2-doctor telemetry watch --record first_try -t 30    # also record 30 s, as first_try_<time>_<iface>.jsonl.gz
+uv run h2-doctor telemetry watch -q --record                 # record without the table (long runs)
+uv run h2-doctor telemetry watch rt/odommodestate            # any topic: looked up in the cache, else by discovery (~2 s)
+uv run h2-doctor telemetry replay FILE                       # play a recording back in the same table (no robot needed)
+uv run h2-doctor telemetry replay FILE rt/lf/bmsstate -s 4   # one recorded topic, 4x faster
 ```
 
-`watch` subscribes (read-only) to the core topics, `CORE_TOPICS` in `src/h2_bridge/telemetry/layout.py`, or to the `TOPIC`s given. With `--quiet` it prints one line at the start and, at the end, the messages received and dropped per topic and where the recording went. Ctrl-C stops it cleanly (it never cuts a line in half); a second Ctrl-C stops at once.
+`watch` subscribes (read-only) to the core topics, `CORE_TOPICS` in `src/h2_bridge/telemetry/layout.py`, or to the `TOPIC`s given. A name that isn't core is looked up in the **topic cache** (`bridge/cache/topics.json`, filled by every `discovery topics` run), and only if it isn't cached either, by a 2 s discovery run (which also fills the cache). Put `TOPIC`s before `--record`, or `--record` reads the first one as its name. Ctrl-C stops cleanly (it never cuts a line in half); a second Ctrl-C stops at once. At the end it prints the messages received (and dropped) per topic and where the recording went.
 
-**Recordings** are JSON Lines in `outputs/telemetry/<date>/`: a header line (start time, host, interface, domain, and each topic's DDS type and expected Hz), then one line per message (`t` = arrival time, `topic`, `data`). Only the watched topics are recorded. The file is flushed about 4 times a second, so a crash loses at most the last ~0.25 s, and a recording is never overwritten.
+**Recordings** are gzipped JSON Lines (`.jsonl.gz`, about 10x smaller than plain: ~300 MB/hour for the core topics) in `outputs/telemetry/<date>/`:
+- a header line: start time, host, interface, domain, and each topic's DDS type and expected Hz;
+- one line per message: `t` (arrival time), `topic`, `data`;
+- a footer line when the recording closes: end time, duration, message count, and `dropped` per topic. **No footer** means the recorder died (power loss, `kill -9`).
 
-**Live table** (being rebuilt, not available yet). The planned views:
+Only the watched topics are recorded. The file is flushed about 4 times a second, so a crash loses at most the last ~0.25 s, and a recording is never overwritten. Read one with `zcat FILE | head`. `replay` also reads older plain `.jsonl` recordings.
+
+**`replay`** plays a recording at its recorded pace (`-s/--speed` to change it) in the same table as `watch`. Rates and ages run on the recording's clock, so they match the live run at any speed; the clock stops at the last message. At the end it says whether the recording closed cleanly (footer) or was cut off.
+
+**The live table.** Two views:
 
 *Overview* (no topic given): one row per topic.
 
 | Column | Meaning |
 |---|---|
-| Hz | measured rate / expected rate. Green: at least 80% of expected. Yellow: slow. Red: silent. |
-| Last | seconds since the topic's newest message |
+| Hz | measured rate / expected rate. Green: at least 80% of expected. Yellow: slow. Red: silent, or stale (newest message older than 5 periods, at least 0.5 s). |
+| Last | seconds since the topic's newest message (red when stale) |
 | Summary | a few key fields of the newest message. A `?` marks a unit that is likely but unconfirmed (see the MVP's `docs/field_map.md`). |
 
 *One topic* (`watch TOPIC`): subscribes to that topic only and shows every value of its newest message, the raw data with no interpretation:
-- a status line: type, measured / expected Hz, time since the last message, dropped count;
+- a status line: type, measured / expected Hz, time since the last message, dropped count (live only);
 - a **Field | Value** list of plain fields; nested ones are flattened with dots (`imu_state.rpy`);
 - a table per list of sub-messages, one row per slot (`motor_state`, `press_sensor_state`). Joint and finger slots are named from `layout.py`; slots past the named ones show `(unused)`.
 
@@ -117,9 +125,9 @@ It works for any message type without knowing it. `rt/lf/lowstate` and the hands
 
 The 6 topics, about 280 messages/s in total, are what the dashboard draws: `rt/lf/lowstate` (body, 20 Hz), `rt/lf/secondary_imu` (torso IMU), `rt/lf/bmsstate` (battery), `rt/lf/mainboardstate` (board temperatures, fans), `rt/dex5/left/state` and `rt/dex5/right/state` (hands, 100 Hz).
 
-**Why only these topics.** Every message costs Python time to decode, even on a background thread. Subscribing to everything, including the ~1 kHz `rt/lowstate` and `rt/lowcmd`, overloads Python and makes the rates read low (the MVP saw `rt/lf/*` at 10 Hz instead of 20). So `watch` uses the 20 Hz `rt/lf/...` copies and leaves the fast topics out. The caption shows how many messages were **dropped**; if that isn't 0, the display fell behind and its numbers can't be trusted.
+**Why only these topics.** Every message costs Python time to decode, even on a background thread. Subscribing to everything, including the ~1 kHz `rt/lowstate` and `rt/lowcmd`, overloads Python and makes the rates read low (the MVP saw `rt/lf/*` at 10 Hz instead of 20). So `watch` uses the 20 Hz `rt/lf/...` copies and leaves the fast topics out. The caption shows how many messages were **dropped** (live only); if that isn't 0, the loop fell behind and its numbers can't be trusted.
 
-**How the data flows.** A *source* hands out every message; each consumer keeps what it needs. The recorder writes all of them; the live table will count every message for the rates and keep only the newest per topic for the screen. The source is the robot (`LiveSource`) or, for `replay`, a recording (`ReplaySource`), behind the same interface.
+**How the data flows.** A *source* hands out every message; each consumer keeps what it needs. The recorder writes all of them; the table counts every message for the rates and keeps only the newest per topic for the screen. The source is the robot (`LiveSource`) or, for `replay`, a recording (`ReplaySource`), behind the same interface.
 
 ### Saved files
 
@@ -132,10 +140,13 @@ outputs/discovery/2026-11-23/snapshot_161435_eth10.json
 
 The time is when the run started. The interface in the name tells robot runs (`eth10`) apart from laptop tests. Every saved file gets its path from `h2_bridge/utils/outputs.py`. You can choose the `<name>` part (letters, digits, `-`, `_`, `.`), but never the folder, so all results end up in this one place.
 
+The program's own state goes in `bridge/cache/` (also ignored by git), through `h2_bridge/utils/cache.py`. Today that's `topics.json`, the topic cache: which DDS type each topic carries, learned from discovery runs. It's safe to delete; the next `discovery topics` rebuilds it.
+
 ### Output and exit codes
 
 - Results (tables) go to **stdout**. Spinners and messages go to **stderr**, so `> file` or `| less` only captures the results.
-- Exit codes: `0` success, `1` ran but found nothing (e.g. `watch` received no data, or a topic can't be found), `2` bad arguments, `130` stopped with Ctrl-C (`telemetry watch` instead stops cleanly and exits `0`/`1`).
+- Exit codes: `0` success, `1` ran but found nothing (e.g. `watch` received no data, a topic can't be found, or `replay` can't read the file), `2` bad arguments, `130` stopped with Ctrl-C (`telemetry watch` and `replay` instead stop cleanly and exit `0`/`1`).
+- `telemetry watch`/`replay` redraw a live table in a terminal. Piped or redirected, they print only the final table.
 
 ### Code layout
 
@@ -153,24 +164,28 @@ src/h2_bridge/
                     #   collect.py  = DDS -> Snapshot (the only discovery module that touches DDS)
                     #   analysis.py = Snapshot -> views (group_by_topic, endpoints_by_participant, participant_ips)
                     #   persistence.py = Snapshot <-> JSON in outputs/ (save_snapshot, load_snapshot)
+                    #   topic_cache.py = topic -> type, learned from snapshots (bridge/cache/topics.json)
   telemetry/        # telemetry logic (no argparse):
                     #   models.py   = TopicSpec (a topic we read) and Message (one received message)
                     #   layout.py   = robot facts: CORE_TOPICS (SDK class, expected Hz), joint/finger slots, array sizes
                     #   sources/base.py = Source (the shared interface) and TopicError
                     #   sources/live.py = LiveSource: the robot over DDS (the only telemetry module that touches DDS)
                     #   sources/replay.py = ReplaySource: a recording, played back at its original pace
-                    #   recording.py = the .jsonl format: RecordingWriter, read_header, read_message
-                    #   resolve.py  = topic names -> TopicSpecs (core instantly, others via a short discovery run)
+                    #   recording.py = the .jsonl.gz format: RecordingWriter, open_recording, read_header, read_line
+                    #   resolve.py  = topic names -> TopicSpecs (core, then the topic cache, then a short discovery run)
+                    #   stream.py   = consumers of the message stream: latest(), RateMeter
+                    #   summary.py  = one-line summary per message type (the core 6), for watch
   dds.py            # shared DDS setup (init_dds, make_participant)
   utils/            # small shared helpers (no DDS, no argparse):
                     #   convert.py = SDK message -> plain dict (msg_to_dict)
                     #   outputs.py = paths for saved files (outputs/<group>/<date>/...)
                     #   sdk_types.py = DDS type name -> SDK class (lookup_type)
-  constants.py      # defaults (DDS_DEFAULTS) and paths (BRIDGE_ROOT, OUTPUT_DIR)
+                    #   cache.py   = the program's own state in bridge/cache/ (cache_path, read_json, atomic write_json)
+  constants.py      # defaults (DDS_DEFAULTS) and paths (BRIDGE_ROOT, OUTPUT_DIR, CACHE_DIR)
 ```
 
 To add a group, create `cli/<group>.py` with a `register(commands)` function and call it from `build_parser()` in `cli/cli.py`.
 
 ### Planned
 
-Not built yet: the `watch` live table, `telemetry replay FILE`, `serve` for the dashboard, `check` (a health sweep of every topic), and `--json` output.
+Not built yet: `serve` for the dashboard, `check` (a health sweep of every topic), and `--json` output.

@@ -10,6 +10,11 @@ Table; printing (or redrawing it live) is up to the caller (cli/telemetry.py).
 # A topic counts as healthy at >= this fraction of its expected rate.
 _RATE_OK = 0.8
 
+# A topic is stale (shown red) once its newest message is older than this many
+# expected periods, and at least _STALE_MIN_S seconds old.
+_STALE_PERIODS = 5
+_STALE_MIN_S = 0.5
+
 
 def watch_table(topics, newest, meter, dropped, now):
     """One row per watched topic: its rate, how long since the last message, and a summary.
@@ -22,10 +27,11 @@ def watch_table(topics, newest, meter, dropped, now):
         The newest message per topic so far (from latest()); a topic may be missing.
     meter : RateMeter
         Rates, measured from every message.
-    dropped : dict[str, int]
-        Messages lost per topic because the display fell behind (the source's `dropped`).
+    dropped : dict[str, int] | None
+        Messages lost per topic because the loop fell behind (LiveSource.dropped);
+        None for a replay, which can't drop.
     now : float
-        Current time (time.time()), for the "Last" column.
+        The source's clock (source.now()), for rates and the "Last" column.
     """
     from rich.table import Table
 
@@ -40,20 +46,37 @@ def watch_table(topics, newest, meter, dropped, now):
 
     for name, spec in topics.items():
         message = newest.get(name)
+        stale = message is not None and _is_stale(spec, now - message.t)
         table.add_row(
             name,
             spec.msg_type.__name__,
-            _rate_cell(meter.hz(name, now), spec.expected_hz),
-            "-" if message is None else f"{now - message.t:.1f}s",
+            "[red]0 (stale)[/]" if stale else _rate_cell(meter.hz(name, now), spec.expected_hz),
+            _age_cell(message, now, stale),
             "[dim]waiting for data...[/]" if message is None else summarize(spec, message.data),
         )
 
-    lost = sum(dropped.values())
-    table.caption = (
-        f"{len(topics)} topics · rates over the last {meter.window_s:.0f}s · "
-        + ("[green]0 dropped[/]" if lost == 0 else f"[bold red]{lost} dropped: rates and values are behind[/]")
-    )
+    caption = f"{len(topics)} topics · rates over the last {meter.window_s:.0f}s"
+    if dropped is not None:
+        lost = sum(dropped.values())
+        caption += " · " + (
+            "[green]0 dropped[/]" if lost == 0 else f"[bold red]{lost} dropped: rates and values are behind[/]"
+        )
+    table.caption = caption
     return table
+
+
+def _is_stale(spec, age):
+    """True if a topic's newest message is too old for its expected rate."""
+    limit = _STALE_PERIODS / spec.expected_hz if spec.expected_hz else 0.0
+    return age > max(limit, _STALE_MIN_S)
+
+
+def _age_cell(message, now, stale):
+    """'0.0s' since the newest message; red when stale, '-' before the first."""
+    if message is None:
+        return "-"
+    text = f"{now - message.t:.1f}s"
+    return f"[red]{text}[/]" if stale else text
 
 
 def _rate_cell(hz, expected):
@@ -75,7 +98,8 @@ def topic_view(name, spec, message, meter, dropped, now):
     Slots get names from layout.py where it has them (joints, fingers).
 
     Parameters are as for watch_table, but for one topic: `message` is its newest
-    Message (None until the first arrives) and `dropped` is its dropped count.
+    Message (None until the first arrives) and `dropped` is its dropped count
+    (None for a replay).
     """
     from rich.console import Group
     from rich.table import Table
@@ -84,7 +108,7 @@ def topic_view(name, spec, message, meter, dropped, now):
         f"[bold]{name}[/]  [magenta]{spec.msg_type.__name__}[/]  ·  "
         f"{_rate_cell(meter.hz(name, now), spec.expected_hz)} Hz  ·  "
         + ("[dim]waiting for data...[/]" if message is None else f"last {now - message.t:.1f}s ago")
-        + ("" if dropped == 0 else f"  ·  [bold red]{dropped} dropped[/]")
+        + ("" if not dropped else f"  ·  [bold red]{dropped} dropped[/]")
     )
     if message is None:
         return Group(status)
