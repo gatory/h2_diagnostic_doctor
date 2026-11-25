@@ -125,7 +125,7 @@ outputs/<group>/<YYYY-MM-DD>/<name>_<HHMMSS>_<interface>.json
 outputs/discovery/2026-11-23/snapshot_161435_eth10.json
 ```
 
-The time is when the run started. The interface in the name tells robot runs (`eth10`) apart from laptop tests. Every saved file gets its path from `h2_bridge/outputs.py`. You can choose the `<name>` part (letters, digits, `-`, `_`, `.`), but never the folder, so all results end up in this one place.
+The time is when the run started. The interface in the name tells robot runs (`eth10`) apart from laptop tests. Every saved file gets its path from `h2_bridge/utils/outputs.py`. You can choose the `<name>` part (letters, digits, `-`, `_`, `.`), but never the folder, so all results end up in this one place.
 
 ### Output and exit codes
 
@@ -154,11 +154,12 @@ src/h2_bridge/
                     #   layout.py   = robot facts: CORE_TOPICS (SDK class, expected Hz), joint/finger slots, array sizes
                     #   sources/base.py = Source (the shared interface) and latest()
                     #   sources/live.py = LiveSource: the robot over DDS (the only telemetry module that touches DDS)
-                    #   convert.py  = SDK message -> plain dict
                     #   rates.py    = RateMeter: Hz per topic from message arrival times
                     #   summary.py  = one-line summary per message type, for watch
   dds.py            # shared DDS setup (init_dds, make_participant)
-  outputs.py        # paths for saved files (outputs/<group>/<date>/...)
+  utils/            # small shared helpers (no DDS, no argparse):
+                    #   convert.py = SDK message -> plain dict (msg_to_dict)
+                    #   outputs.py = paths for saved files (outputs/<group>/<date>/...)
   constants.py      # defaults (DDS_DEFAULTS) and paths (BRIDGE_ROOT, OUTPUT_DIR)
 ```
 

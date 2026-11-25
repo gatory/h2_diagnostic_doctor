@@ -61,7 +61,7 @@ def register(commands):
     )
     watch.set_defaults(func=_cmd_watch)
 
-    # h2-doctor telemetry record  (saves to outputs/telemetry/<date>/ via h2_bridge.outputs)
+    # h2-doctor telemetry record  (saves to outputs/telemetry/<date>/ via h2_bridge.utils.outputs)
     record = telemetry_cmds.add_parser("record", help="Save telemetry to outputs/telemetry/<date>/ (not implemented yet)")
     record.set_defaults(func=_not_implemented)
 

@@ -3,7 +3,7 @@
     save_snapshot(snapshot, name)  -> outputs/discovery/<date>/<name>_<time>_<interface>.json
     load_snapshot(path)            -> Snapshot
 
-Where files go is decided by h2_bridge.outputs; this module only turns a
+Where files go is decided by h2_bridge.utils.outputs; this module only turns a
 Snapshot into JSON and back.
 """
 
@@ -26,7 +26,7 @@ def save_snapshot(snapshot, name="snapshot"):
     import json
     from dataclasses import asdict
 
-    from h2_bridge.outputs import output_path
+    from h2_bridge.utils.outputs import output_path
 
     started = datetime.fromisoformat(snapshot.taken_at)
     path = output_path("discovery", name, snapshot.interface, when=started)

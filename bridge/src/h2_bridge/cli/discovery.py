@@ -147,7 +147,7 @@ def _cmd_show(args):
 
     from h2_bridge.discovery.analysis import group_by_topic
     from h2_bridge.discovery.persistence import load_snapshot
-    from h2_bridge.outputs import find_outputs
+    from h2_bridge.utils.outputs import find_outputs
 
     out = Console()
     err = Console(stderr=True)
@@ -208,7 +208,7 @@ def _save_name(value):
     """argparse type for --save: check the name before any discovery runs."""
     import argparse
 
-    from h2_bridge.outputs import check_name
+    from h2_bridge.utils.outputs import check_name
 
     try:
         return check_name(value)
