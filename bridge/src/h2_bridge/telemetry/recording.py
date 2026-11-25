@@ -2,14 +2,15 @@
 
 JSON Lines, one object per line: a header first, then every message in arrival order.
 
-    {"recording": 1, "started": "2026-11-24T15:01:02", "interface": "eth10", "domain_id": 0,
-     "topics": {"rt/lf/lowstate": {"type": "unitree_hg.msg.dds_.LowState_", "expected_hz": 20.0}}}
+    {"recording": 1, "started": "2026-11-24T15:01:02-07:00", "host": "thor", "interface": "eth10",
+     "domain_id": 0, "topics": {"rt/lf/lowstate": {"type": "unitree_hg::msg::dds_::LowState_", "expected_hz": 20.0}}}
     {"t": 1764000062.12, "topic": "rt/lf/lowstate", "data": {...}}
 
 Files live in outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl (via utils/outputs.py).
 """
 
 import json
+import socket
 from datetime import datetime
 
 from h2_bridge.telemetry.models import Message, TopicSpec
@@ -19,35 +20,51 @@ FORMAT_VERSION = 1
 
 
 class RecordingWriter:
-    """Append every message from a LiveSource to a new recording file.
+    """Write every message from a LiveSource to a new recording file.
 
-        with LiveSource("eth10", 0) as source, RecordingWriter(source) as rec:
+        with LiveSource("eth10", 0, CORE_TOPICS) as source, RecordingWriter(source) as rec:
             rec.write(source.poll())
+
+    Attributes
+    ----------
+    path : Path
+        Where the recording is being written.
+    count : int
+        Messages written so far.
     """
 
     def __init__(self, source, name="recording"):
         from h2_bridge.utils.outputs import output_path
 
-        started = datetime.now()
+        started = datetime.now().astimezone()
         self.path = output_path("telemetry", name, source.interface, when=started, ext="jsonl")
-        self._file = open(self.path, "w")
+        self.count = 0
+        self._file = open(self.path, "x", encoding="utf-8")  # "x": never overwrite a recording
         header = {
             "recording": FORMAT_VERSION,
             "started": started.isoformat(timespec="seconds"),
+            "host": socket.gethostname(),
             "interface": source.interface,
             "domain_id": source.domain_id,
             "topics": {
-                name: {"type": spec.msg_type.__idl_typename__, "expected_hz": spec.expected_hz}
+                name: {"type": spec.type_name, "expected_hz": spec.expected_hz}
                 for name, spec in source.topics.items()
             },
         }
-        self._file.write(json.dumps(header) + "\n")
+        self._write_line(header)
 
     def write(self, messages):
+        """Append `messages` (one poll's worth) and flush, so a crash loses at most this batch."""
         for m in messages:
-            self._file.write(json.dumps({"t": m.t, "topic": m.topic, "data": m.data}) + "\n")
+            self._write_line({"t": m.t, "topic": m.topic, "data": m.data})
+        self.count += len(messages)
+        self._file.flush()
+
+    def _write_line(self, obj):
+        self._file.write(json.dumps(obj, allow_nan=False, separators=(",", ":")) + "\n")
 
     def close(self):
+        """Close the file. Safe to call twice."""
         if not self._file.closed:
             self._file.close()
 
@@ -77,7 +94,7 @@ def read_message(line):
 
 
 def _sdk_class(type_name):
-    """"unitree_hg.msg.dds_.LowState_" -> the SDK's LowState_ class."""
+    """"unitree_hg::msg::dds_::LowState_" (or the "." form) -> the SDK's LowState_ class."""
     cls = lookup_type(type_name)
     if cls is None:
         raise ValueError(f"recording uses type {type_name!r}, which this SDK doesn't have")

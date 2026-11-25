@@ -81,6 +81,10 @@ def register(commands):
         help="also save what's watched (only those topics) to outputs/telemetry/<date>/, "
              "optionally named NAME (default name: recording)",
     )
+    watch.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="no live table, just a start line and a summary (required for now: the table isn't built yet)",
+    )
     watch.set_defaults(func=_cmd_watch)
 
     # h2-doctor telemetry replay FILE [TOPIC ...] [--speed X]
@@ -105,18 +109,97 @@ def register(commands):
 
 
 def _cmd_watch(args):
-    """Handler for `h2-doctor telemetry watch [TOPIC ...] [-t SECS] [--record [NAME]]`.
+    """Handler for `h2-doctor telemetry watch [TOPIC ...] [-t SECS] [--record [NAME]] [--quiet]`.
 
-    1. Topics: LiveCatalog(iface, domain).select(args.topics or None):
-       core topics instantly, others from the cache, then discovery.
+    1. Topics: the core topics, or resolve_topics(TOPICs) (core instantly, others by discovery).
     2. Source: LiveSource(iface, domain, topics).
     3. With --record: a RecordingWriter for the same topics.
-    4. The shared loop (_run): poll ~4 times a second, hand every message to
-       the rate meter and the recorder, keep the newest per topic for the table.
+    4. The shared loop (_run): poll ~4 times a second, hand every message to the recorder.
+       (The live table will be another consumer; for now only --quiet is supported.)
 
-    Returns 1 if no data arrived (wrong interface or domain?) or a topic can't be found.
+    Returns 1 if a topic can't be found, DDS can't start, or no data arrived.
     """
-    return _not_implemented(args)
+    import contextlib
+
+    from rich.console import Console
+
+    from h2_bridge.dds import DDSError
+    from h2_bridge.telemetry.layout import CORE_TOPICS
+    from h2_bridge.telemetry.recording import RecordingWriter
+    from h2_bridge.telemetry.resolve import resolve_topics
+    from h2_bridge.telemetry.sources.base import TopicError
+    from h2_bridge.telemetry.sources.live import LiveSource
+
+    err = Console(stderr=True)
+    if not args.quiet:
+        err.print("[yellow]The live table isn't built yet.[/] Use --quiet (add --record to save a recording).")
+        return 1
+
+    try:
+        topics = resolve_topics(args.topics, args.interface, args.domain_id) if args.topics else CORE_TOPICS
+        with (
+            LiveSource(args.interface, args.domain_id, topics) as source,
+            RecordingWriter(source, args.record) if args.record else contextlib.nullcontext() as recorder,
+        ):
+            saving = f" to [bold]{recorder.path}[/]" if recorder else " (not saving: add --record)"
+            err.print(f"Watching {len(topics)} topic(s) on [bold]{args.interface}[/] "
+                      f"(domain {args.domain_id}){saving}. Ctrl-C to stop.")
+            counts = _run(source, recorder, args.duration)
+    except (TopicError, DDSError) as e:
+        err.print(f"[bold red]Can't watch:[/] {e}")
+        return 1
+
+    _print_summary(err, counts, source.dropped, recorder)
+    if not any(counts.values()):
+        err.print("[bold red]No data received.[/] Check the interface and domain ID.")
+        return 1
+    return 0
+
+
+# How often the loop polls the source.
+POLL_SECS = 0.25
+
+
+def _run(source, recorder, duration):
+    """Poll `source` until `duration` (None: forever) or Ctrl-C; return {topic: messages seen}.
+
+    Every message goes to `recorder` (if any). Ctrl-C only sets a flag, so it can
+    never land halfway through writing a line; a second Ctrl-C stops at once.
+    """
+    import signal
+    import time
+
+    stop = False
+
+    def on_ctrl_c(signum, frame):
+        nonlocal stop
+        if stop:  # second Ctrl-C: give up waiting
+            raise KeyboardInterrupt
+        stop = True
+
+    counts = dict.fromkeys(source.topics, 0)
+    end = None if duration is None else time.monotonic() + duration
+    previous = signal.signal(signal.SIGINT, on_ctrl_c)
+    try:
+        while not stop and (end is None or time.monotonic() < end):
+            time.sleep(POLL_SECS)
+            messages = source.poll()
+            if recorder:
+                recorder.write(messages)
+            for m in messages:
+                counts[m.topic] += 1
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    return counts
+
+
+def _print_summary(err, counts, dropped, recorder):
+    """One line per topic: messages seen and dropped; then where the recording went."""
+    for topic, n in counts.items():
+        lost = f"  [red]{dropped[topic]} dropped[/]" if dropped[topic] else ""
+        err.print(f"  {topic:<28} {n:>8} messages{lost}")
+    if recorder:
+        err.print(f"Saved {recorder.count} messages to [bold]{recorder.path}[/]")
 
 
 def _cmd_replay(args):
