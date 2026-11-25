@@ -15,38 +15,56 @@ from h2_bridge.telemetry.models import Message
 from h2_bridge.telemetry.sources.base import Source, TopicError
 from h2_bridge.utils.convert import msg_to_dict
 
+# Inbox cap (~30 s of core topics) so a stalled poll() can't use unbounded memory
+MAX_PENDING = 10_000
+
 
 class LiveSource(Source):
-    """`topics` ({name: TopicSpec}, e.g. CORE_TOPICS) on `interface` / `domain_id`.
+    """Subscribes to `topics` on the robot over DDS and hands out every message via poll().
 
-    `dropped` ({topic: count}) counts messages lost because poll() fell behind. Should stay 0.
+    Parameters
+    ----------
+    interface : str
+        Network interface DDS uses, e.g. "eth10".
+    domain_id : int
+        DDS domain; must match the robot's.
+    topics : dict[str, TopicSpec]
+        Topics to subscribe to, e.g. CORE_TOPICS.
+
+    Attributes
+    ----------
+    dropped : dict[str, int]
+        Messages lost per topic because poll() fell behind (inbox over MAX_PENDING). Should stay 0.
     """
 
     live = True
 
-    def __init__(self, interface, domain_id, topics, max_pending=10_000):
+    def __init__(self, interface, domain_id, topics):
         super().__init__(topics)
         self.interface = interface
         self.domain_id = domain_id
         self.dropped = dict.fromkeys(self.topics, 0)
-        self._max_pending = max_pending  # ~30 s of all core topics
         self._inbox = deque()  # (arrival time, topic, SDK message)
-        self._lock = threading.Lock()  # the DDS thread and poll() both touch the inbox
+        self._lock = threading.Lock()  # for the DDS thread and poll() since they both touch the inbox
         self._subscribers = []
 
     def start(self):
+        """Start DDS and subscribe to every topic. Raises DDSError or TopicError; nothing is left subscribed on failure."""
         from unitree_sdk2py.core.channel import ChannelSubscriber
 
         from h2_bridge.dds import init_dds
 
+        if self._subscribers:
+            return self
+        
         init_dds(self.interface, self.domain_id)
         try:
             for name, spec in self.topics.items():
                 try:
                     sub = ChannelSubscriber(name, spec.msg_type)
-                    sub.Init(self._make_handler(name))  # no queueLen: runs on DDS's own thread
+                    sub.Init(self._make_handler(name))
                 except Exception as e:
-                    raise TopicError(f"can't subscribe to {name!r} ({spec.msg_type.__name__}): {e}") from e
+                    raise TopicError(f"can't subscribe to {name!r} ({spec.type_name}): {e}") from e
                 self._subscribers.append(sub)
         except Exception:
             self.close()
@@ -59,7 +77,7 @@ class LiveSource(Source):
         def handle(msg):  # DDS thread: keep it tiny
             arrived = time.time()
             with self._lock:
-                if len(self._inbox) >= self._max_pending:
+                if len(self._inbox) >= MAX_PENDING:
                     _, lost, _ = self._inbox.popleft()
                     self.dropped[lost] += 1
                 self._inbox.append((arrived, topic, msg))
@@ -67,11 +85,13 @@ class LiveSource(Source):
         return handle
 
     def poll(self):
+        """Empty the inbox and convert each message to a Message, oldest first."""
         with self._lock:  # swap in an empty inbox; hold the lock briefly
             inbox, self._inbox = self._inbox, deque()
         return [Message(t, topic, msg_to_dict(msg)) for t, topic, msg in inbox]
 
     def close(self):
+        """Unsubscribe from every topic. Safe to call twice."""
         subscribers, self._subscribers = self._subscribers, []
         for sub in subscribers:
             sub.Close()
