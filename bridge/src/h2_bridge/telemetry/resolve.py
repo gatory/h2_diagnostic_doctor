@@ -2,39 +2,64 @@
 
     resolve_topics(["rt/lf/bmsstate", "rt/some/topic"], "eth10", 0)   # -> {name: TopicSpec}
 
-Core topics come straight from CORE_TOPICS (instant). Any other name is looked up
-with one short discovery run: the type its writers publish, then the SDK class for it.
+Each name is looked up in order, stopping at the first that knows it:
+    1. CORE_TOPICS   hand-checked, instant
+    2. topic cache   learned from earlier discovery runs (bridge/cache/topics.json), instant
+    3. discovery     one short run for whatever is left; it also updates the cache
 """
 
 import difflib
 
+from h2_bridge.discovery.topic_cache import load_topic_cache
 from h2_bridge.telemetry.layout import CORE_TOPICS
 from h2_bridge.telemetry.models import TopicSpec
 from h2_bridge.telemetry.sources.base import TopicError
 from h2_bridge.utils.sdk_types import lookup_type
 
-# How long to listen for a non-core topic's writers.
+# How long to listen for a topic's writers when neither CORE_TOPICS nor the cache knows it.
 DISCOVERY_SECS = 2.0
 
 
 def resolve_topics(names, interface, domain_id, secs=DISCOVERY_SECS):
     """Return {name: TopicSpec} for `names`, in the order given.
 
-    Runs discovery (once, for all of them) only if some name isn't a core topic.
-    Raises TopicError if a topic isn't seen, has no writers, has writers of
-    different types, or uses a type this SDK doesn't have.
+    Runs discovery (once, for all of them) only for names that are neither core
+    nor cached. Raises TopicError if a topic isn't seen, has no writers, has
+    writers of different types, or uses a type this SDK doesn't have.
     """
-    others = [name for name in names if name not in CORE_TOPICS]
-    found = _discover(others, interface, domain_id, secs) if others else {}
-    return {name: CORE_TOPICS[name] if name in CORE_TOPICS else found[name] for name in names}
+    found = {}
+    cache = None
+    for name in names:
+        if name in CORE_TOPICS:
+            found[name] = CORE_TOPICS[name]
+            continue
+        cache = load_topic_cache() if cache is None else cache
+        spec = _from_cache(name, cache)
+        if spec:
+            found[name] = spec
+
+    missing = [name for name in names if name not in found]
+    if missing:
+        found.update(_discover(missing, interface, domain_id, secs))
+    return {name: found[name] for name in names}
+
+
+def _from_cache(name, cache):
+    """TopicSpec from the cache entry, or None if there's none (or its type isn't in this SDK)."""
+    entry = cache.get(name)
+    msg_type = lookup_type(entry["type"]) if entry else None
+    return TopicSpec(name, msg_type, expected_hz=None) if msg_type else None
 
 
 def _discover(names, interface, domain_id, secs):
-    """{name: TopicSpec} for non-core `names`, from one discovery run."""
+    """{name: TopicSpec} for `names`, from one discovery run (which also updates the cache)."""
     from h2_bridge.discovery.analysis import group_by_topic
     from h2_bridge.discovery.collect import collect_snapshot
+    from h2_bridge.discovery.topic_cache import update_topic_cache
 
-    seen = group_by_topic(collect_snapshot(interface, domain_id, secs))
+    snapshot = collect_snapshot(interface, domain_id, secs)
+    update_topic_cache(snapshot)
+    seen = group_by_topic(snapshot)
     return {name: _spec_for(name, seen, secs) for name in names}
 
 

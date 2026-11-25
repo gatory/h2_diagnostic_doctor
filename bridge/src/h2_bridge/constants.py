@@ -10,3 +10,4 @@ DDS_DEFAULTS = {
 
 BRIDGE_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = BRIDGE_ROOT / "outputs"
+CACHE_DIR = BRIDGE_ROOT / "cache"  # the program's own state (vs. results in OUTPUT_DIR)
