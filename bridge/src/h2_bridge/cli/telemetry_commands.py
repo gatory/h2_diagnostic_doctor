@@ -1,49 +1,49 @@
 """`h2-doctor telemetry ...` commands: watch the robot's live data, record it, replay it.
 
-    h2-doctor telemetry watch                                  # core topics, until Ctrl-C
-    h2-doctor telemetry watch rt/lf/bmsstate rt/odommodestate  # any topics by name
-    h2-doctor telemetry watch rt/lf/bmsstate --record          # also save what's watched
-    h2-doctor telemetry replay FILE                            # play a recording back
-    h2-doctor telemetry replay FILE rt/lf/bmsstate --speed 4   # some of it, 4x faster
+    h2-doctor telemetry watch                 # the core topics, until Ctrl-C
+    h2-doctor telemetry watch --record        # also save them
+    h2-doctor telemetry watch -q --record     # save them without the live dashboard
+    h2-doctor telemetry replay                # play the newest recording back
+    h2-doctor telemetry replay FILE -s 4      # a given one, 4x faster
 
 Both commands run the same loop (_play): poll the source ~4 times a second and
-hand every batch to each consumer (the recorder, the live table). This module
-only parses arguments and drives that loop; the logic is in h2_bridge.telemetry
-and the tables in telemetry_tables.py.
+hand every batch to each consumer (the rate meter, the recorder, the live
+dashboard). This module only parses arguments and drives that loop; the logic
+is in h2_bridge.telemetry and the screen in telemetry_dashboard.py.
 """
 
 import argparse
 
 _WATCH_EXAMPLES = """\
 examples:
-  h2-doctor telemetry watch                                   overview of the core topics until Ctrl-C
-  h2-doctor telemetry watch rt/lf/lowstate                    every value of one topic (one row per joint)
-  h2-doctor telemetry watch rt/lf/bmsstate rt/odommodestate   any topics; non-core ones are looked up (cache, then discovery)
-  h2-doctor telemetry watch -t 30                             stop after 30 s
-  h2-doctor telemetry watch rt/lf/bmsstate --record           also save it to outputs/telemetry/<date>/
-  h2-doctor telemetry watch --record before_walk -t 60        save the core topics as before_walk_<time>_<iface>.jsonl.gz
-  h2-doctor telemetry watch -q --record                       record without the live table
-  h2-doctor --iface eth0 telemetry watch                      another interface (global option, before the group)
-
-Put TOPICs before --record: `--record rt/lf/x` would read the topic as NAME.
+  h2-doctor telemetry watch                              the core topics until Ctrl-C
+  h2-doctor telemetry watch -t 30                        stop after 30 s
+  h2-doctor telemetry watch --record                     also save them to outputs/telemetry/<date>/
+  h2-doctor telemetry watch --record before_walk -t 60   save as before_walk_<time>_<iface>.jsonl.gz
+  h2-doctor telemetry watch -q --record                  record without the live dashboard
+  h2-doctor --iface eth0 telemetry watch                 another interface (global option, before the group)
 
 core topics: rt/lf/lowstate, rt/lf/secondary_imu, rt/lf/bmsstate, rt/lf/mainboardstate,
              rt/dex5/left/state, rt/dex5/right/state
 
-overview columns:
-  Hz        rate over the last 2 s / expected rate (green: on rate, yellow: slow, red: silent or stale)
-  Avg       average rate since the start (also printed at the end, and saved in a recording's footer)
-  Last      seconds since the topic's newest message (red: stale)
-  Summary   a few key fields of the newest message; "?" marks an unconfirmed unit
+dashboard (needs a terminal of about 160 x 50):
+  Topics       per topic: Hz over the last 2 s / expected (green: on rate, yellow: slow,
+               red: silent or stale), Avg since the start, Last message age, Dropped
+  Body joints  31 joints: q, dq, tau, both temperatures, mode, motorstate
+  Hands        20 motors each (thumb: position only), pressure max per pad, error, power
+  IMUs         pelvis, torso and both hands: rpy, gyro, accel, temperature
+  Battery, Main board
+  Numbers only, no warnings; "?" marks a unit or meaning that isn't confirmed.
 """
 
 _REPLAY_EXAMPLES = """\
 examples:
-  h2-doctor telemetry replay FILE                     every recorded topic, at the recorded pace
-  h2-doctor telemetry replay FILE rt/lf/lowstate      every value of one recorded topic
-  h2-doctor telemetry replay FILE --speed 4           4x faster (rates and ages stay in recording time)
+  h2-doctor telemetry replay                   the newest recording, at the recorded pace
+  h2-doctor telemetry replay --speed 4         4x faster (rates and ages stay in recording time)
+  h2-doctor telemetry replay FILE              a given recording
 
-FILE is a recording made by `telemetry watch --record` (.jsonl.gz, or an older .jsonl).
+FILE is a .jsonl.gz recording made by `telemetry watch --record`; without it,
+the newest one in outputs/telemetry/ is played.
 Needs no robot or network.
 """
 
@@ -61,20 +61,14 @@ def register(commands):
     )
     telemetry_cmds = telemetry.add_subparsers(dest="telemetry_command", metavar="<command>", required=True)
 
-    # h2-doctor telemetry watch [TOPIC ...] [-t SECS] [--record [NAME]] [--quiet]
+    # h2-doctor telemetry watch [-t SECS] [--record [NAME]] [--quiet]
     watch = telemetry_cmds.add_parser(
         "watch",
-        help="Live table of the core topics, or of any topics by name",
-        description="Subscribe to robot topics and redraw a live table as data arrives: the core "
-                    "topics by default, or the TOPICs given (any topic on the network). "
-                    "One TOPIC shows every value it sends. "
+        help="Live dashboard of the core topics",
+        description="Subscribe to the core topics and redraw a live dashboard as data arrives. "
                     "Needs the robot's network (see the global --iface / --domain). Read-only.",
         epilog=_WATCH_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    watch.add_argument(
-        "topics", nargs="*", metavar="TOPIC",
-        help="topics to watch (default: the core topics); others are looked up in the cache, then by discovery",
     )
     watch.add_argument(
         "-t", "--duration", type=float, default=None, metavar="SECS",
@@ -85,28 +79,27 @@ def register(commands):
     # not given           -> None, nothing saved
     watch.add_argument(
         "-r", "--record", nargs="?", const="recording", default=None, type=_record_name, metavar="NAME",
-        help="also save what's watched (only those topics) to outputs/telemetry/<date>/, "
+        help="also save the core topics to outputs/telemetry/<date>/, "
              "optionally named NAME (default name: recording)",
     )
     watch.add_argument(
         "-q", "--quiet", action="store_true",
-        help="no live table, just a start line and a summary (e.g. for long recordings)",
+        help="no live dashboard, just a start line and a summary (e.g. for long recordings)",
     )
     watch.set_defaults(func=_cmd_watch)
 
-    # h2-doctor telemetry replay FILE [TOPIC ...] [--speed X]
+    # h2-doctor telemetry replay [FILE] [--speed X]
     replay = telemetry_cmds.add_parser(
         "replay",
-        help="Play back a recording in the same live table",
-        description="Play a recording back at its original pace (times --speed) in the same table "
-                    "as watch: every recorded topic by default, or only the TOPICs given.",
+        help="Play back a recording in the same live dashboard",
+        description="Play a recording back at its original pace (times --speed) in the same "
+                    "dashboard as watch: the newest one, or FILE.",
         epilog=_REPLAY_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    replay.add_argument("file", metavar="FILE", help="recording made by `telemetry watch --record`")
     replay.add_argument(
-        "topics", nargs="*", metavar="TOPIC",
-        help="recorded topics to show (default: all of them)",
+        "file", nargs="?", default=None, metavar="FILE",
+        help=".jsonl.gz recording made by `telemetry watch --record` (default: the newest in outputs/telemetry/)",
     )
     replay.add_argument(
         "-s", "--speed", type=_speed, default=1.0, metavar="X",
@@ -116,14 +109,13 @@ def register(commands):
 
 
 def _cmd_watch(args):
-    """Handler for `h2-doctor telemetry watch [TOPIC ...] [-t SECS] [--record [NAME]] [--quiet]`.
+    """Handler for `h2-doctor telemetry watch [-t SECS] [--record [NAME]] [--quiet]`.
 
-    1. Topics: the core topics, or resolve_topics(TOPICs) (core, then the cache, then discovery).
-    2. Source: LiveSource(iface, domain, topics).
-    3. With --record: a RecordingWriter for the same topics.
-    4. _play: the live table (unless --quiet) and the recorder get every batch.
+    1. Source: LiveSource(iface, domain, CORE_TOPICS).
+    2. With --record: a RecordingWriter for the same topics.
+    3. _play: the rate meter, the recorder and the live table (unless --quiet) get every batch.
 
-    Returns 1 if a topic can't be found, DDS can't start, or no data arrived.
+    Returns 1 if DDS can't start, a topic can't be subscribed to, or no data arrived.
     """
     import contextlib
 
@@ -132,19 +124,17 @@ def _cmd_watch(args):
     from h2_bridge.dds_setup import DDSError
     from h2_bridge.telemetry.core_topics import CORE_TOPICS
     from h2_bridge.telemetry.recording_format import RecordingWriter
-    from h2_bridge.telemetry.topic_lookup import resolve_topics
     from h2_bridge.telemetry.sources.base_source import TopicError
     from h2_bridge.telemetry.sources.live_source import LiveSource
 
     err = Console(stderr=True)
     try:
-        topics = resolve_topics(args.topics, args.interface, args.domain_id) if args.topics else CORE_TOPICS
         with (
-            LiveSource(args.interface, args.domain_id, topics) as source,
+            LiveSource(args.interface, args.domain_id, CORE_TOPICS) as source,
             RecordingWriter(source, args.record) if args.record else contextlib.nullcontext() as recorder,
         ):
             saving = f" to [bold]{recorder.path}[/]" if recorder else ""
-            err.print(f"Watching {len(topics)} topic(s) on [bold]{args.interface}[/] "
+            err.print(f"Watching the {len(CORE_TOPICS)} core topics on [bold]{args.interface}[/] "
                       f"(domain {args.domain_id}){saving}. Ctrl-C to stop.")
             meter = _play(source, recorder, args.duration, show_table=not args.quiet)
     except (TopicError, DDSError) as e:
@@ -159,24 +149,34 @@ def _cmd_watch(args):
 
 
 def _cmd_replay(args):
-    """Handler for `h2-doctor telemetry replay FILE [TOPIC ...] [--speed X]`.
+    """Handler for `h2-doctor telemetry replay [FILE] [--speed X]`.
 
-    1. Source: ReplaySource(FILE, TOPICs or all recorded, speed).
-    2. _play with the same table as watch; ages and rates use source.now(),
+    1. File: FILE, or the newest .jsonl.gz in outputs/telemetry/ (find_outputs()).
+    2. Source: ReplaySource(file, speed): every topic the recording holds.
+    3. _play with the same dashboard as watch; ages and rates use source.now(),
        so they're in recording time.
 
     Ends when the recording does, then says how it ended (footer, or cut off).
-    Returns 1 if the file or a topic can't be read.
+    Returns 1 if there's no recording, or the file can't be read.
     """
     from rich.console import Console
 
-    from h2_bridge.telemetry.sources.base_source import TopicError
+    from h2_bridge.telemetry.recording_format import EXTENSION
     from h2_bridge.telemetry.sources.replay_source import ReplaySource
+    from h2_bridge.utils.output_paths import find_outputs
 
     err = Console(stderr=True)
+    path = args.file
+    if path is None:
+        recordings = find_outputs("telemetry", ext=EXTENSION)  # newest first
+        if not recordings:
+            err.print("[bold red]No recordings[/] in outputs/telemetry/. Make one with `telemetry watch --record`.")
+            return 1
+        path = recordings[0].path
+        err.print(f"Newest recording: [bold]{path}[/]")
     try:
-        source = ReplaySource(args.file, args.topics or None, speed=args.speed)
-    except (OSError, ValueError, TopicError) as e:  # missing file, not a recording, topic not recorded
+        source = ReplaySource(path, speed=args.speed)
+    except (OSError, ValueError) as e:  # missing file, not a .jsonl.gz recording
         err.print(f"[bold red]Can't replay:[/] {e}")
         return 1
 
@@ -195,8 +195,6 @@ def _cmd_replay(args):
                   f"{source.footer.get('duration_s', '?')} s, {dropped} dropped while recording.")
         if recorded_hz is None:
             err.print("[dim]This recording's footer has no average rates (made before they were saved).[/]")
-    elif not str(args.file).endswith(".gz"):
-        err.print("[dim]Plain .jsonl recording (made before footers): no record of drops.[/]")
     elif source.done:
         err.print("[yellow]No footer:[/] the recorder didn't close cleanly"
                   + (" (the file is cut off)." if source.truncated else "."))
@@ -207,27 +205,22 @@ def _play(source, recorder, duration, show_table):
     """Run the loop on `source` with its consumers; return the RateMeter.
 
     Every batch goes to the rate meter (always, so rates exist even with
-    --quiet), the recorder (if any) and, with `show_table`, the live table:
-    rates from every message, values from the newest per topic. One TOPIC gets
-    the every-value view; several get the overview. The meter's `total` is the
-    message count per topic.
+    --quiet), the recorder (if any) and, with `show_table`, the live dashboard:
+    rates from every message, values from the newest per topic. The meter's
+    `total` is the message count per topic.
     """
     from rich.console import Console
     from rich.live import Live
 
-    from h2_bridge.cli import telemetry_tables
+    from bridge.src.h2_bridge.cli import telemetry_tables
     from h2_bridge.telemetry.rate_meter import RateMeter, latest
 
     meter = RateMeter()
     newest = {}  # topic -> newest Message so far
-    detail = next(iter(source.topics)) if len(source.topics) == 1 else None
     dropped = source.dropped  # None for a replay: it can't drop
 
     def draw(now):
-        if detail:
-            lost = None if dropped is None else dropped[detail]
-            return telemetry_tables.topic_view(detail, source.topics[detail], newest.get(detail), meter, lost, now)
-        return telemetry_tables.watch_table(source.topics, newest, meter, dropped, now)
+        return telemetry_tables.dashboard(source.topics, newest, meter, dropped, now)
 
     def on_poll(messages, now):
         meter.add(messages)  # every message, table or not

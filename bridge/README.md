@@ -86,48 +86,42 @@ uv run h2-doctor discovery show --list                 # every saved snapshot
 ### `telemetry`: the robot's live data
 
 ```bash
-uv run h2-doctor telemetry watch                             # live overview of the core topics until Ctrl-C
-uv run h2-doctor telemetry watch rt/lf/lowstate              # every value of one topic, live
+uv run h2-doctor telemetry watch                             # live view of the core topics until Ctrl-C
 uv run h2-doctor telemetry watch --record first_try -t 30    # also record 30 s, as first_try_<time>_<iface>.jsonl.gz
-uv run h2-doctor telemetry watch -q --record                 # record without the table (long runs)
-uv run h2-doctor telemetry watch rt/odommodestate            # any topic: looked up in the cache, else by discovery (~2 s)
-uv run h2-doctor telemetry replay FILE                       # play a recording back in the same table (no robot needed)
-uv run h2-doctor telemetry replay FILE rt/lf/bmsstate -s 4   # one recorded topic, 4x faster
+uv run h2-doctor telemetry watch -q --record                 # record without the live view (long runs)
+uv run h2-doctor telemetry replay                            # play the newest recording back (no robot needed)
+uv run h2-doctor telemetry replay FILE -s 4                  # a given recording, 4x faster
 ```
 
-`watch` subscribes (read-only) to the core topics, `CORE_TOPICS` in `src/h2_bridge/telemetry/core_topics.py`, or to the `TOPIC`s given. A name that isn't core is looked up in the **topic cache** (`bridge/cache/topics.json`, filled by every `discovery topics` run), and only if it isn't cached either, by a 2 s discovery run (which also fills the cache). Put `TOPIC`s before `--record`, or `--record` reads the first one as its name. Ctrl-C stops cleanly (it never cuts a line in half); a second Ctrl-C stops at once. The table shows each topic's rate over the last 2 s and its average since the start (`Avg`). At the end it prints, per topic, the messages received, the average rate (against the expected rate for core topics) and any dropped, then where the recording went.
+`watch` subscribes (read-only) to the core topics, `CORE_TOPICS` in `src/h2_bridge/telemetry/core_topics.py`, and nothing else. Ctrl-C stops cleanly (it never cuts a line in half); a second Ctrl-C stops at once. At the end it prints, per topic, the messages received, the average rate (against the expected rate for core topics) and any dropped, then where the recording went.
 
 **Recordings** are gzipped JSON Lines (`.jsonl.gz`, about 10x smaller than plain: ~300 MB/hour for the core topics) in `outputs/telemetry/<date>/`:
 - a header line: start time, host, interface, domain, and each topic's DDS type and expected Hz;
 - one line per message: `t` (arrival time), `topic`, `data`;
 - a footer line when the recording closes: end time, duration, message count, `dropped` per topic, and `avg_hz` (each topic's average rate over the recording; footers from before it was added don't have it). **No footer** means the recorder died (power loss, `kill -9`).
 
-Only the watched topics are recorded. The file is flushed about 4 times a second, so a crash loses at most the last ~0.25 s, and a recording is never overwritten. Read one with `zcat FILE | head`. `replay` also reads older plain `.jsonl` recordings.
+The core topics are recorded. The file is flushed about 4 times a second, so a crash loses at most the last ~0.25 s, and a recording is never overwritten. Read one with `zcat FILE | head`. Only `.jsonl.gz` is read: `replay` refuses any other file.
 
-**`replay`** plays a recording at its recorded pace (`-s/--speed` to change it) in the same table as `watch`. Rates and ages run on the recording's clock, so they match the live run at any speed; the clock stops at the last message. At the end it prints each topic's average rate in the replay next to the one saved when it was recorded (they should match), and says whether the recording closed cleanly (footer) or was cut off.
+**`replay`** plays the newest `.jsonl.gz` in `outputs/telemetry/` (or `FILE`, if given) at its recorded pace (`-s/--speed` to change it) in the same dashboard as `watch`. Rates and ages run on the recording's clock, so they match the live run at any speed; the clock stops at the last message. At the end it prints each topic's average rate in the replay next to the one saved when it was recorded (they should match), and says whether the recording closed cleanly (footer) or was cut off.
 
-**The live table.** Two views:
+**The live dashboard** (`cli/telemetry_dashboard.py`) shows every core topic on one screen. It needs a terminal of about **160 x 50**; a smaller one cuts off the right and bottom.
 
-*Overview* (no topic given): one row per topic.
-
-| Column | Meaning |
+| Panel | What it shows |
 |---|---|
-| Hz | measured rate / expected rate. Green: at least 80% of expected. Yellow: slow. Red: silent, or stale (newest message older than 5 periods, at least 0.5 s). |
-| Last | seconds since the topic's newest message (red when stale) |
-| Summary | a few key fields of the newest message. A `?` marks a unit that is likely but unconfirmed (see the MVP's `docs/field_map.md`). |
+| Topics | per topic: Hz over the last 2 s / expected (green: at least 80% of expected, yellow: slow, red: silent or stale, i.e. newest message older than 5 periods and at least 0.5 s), Avg since the start, Last (age of the newest message), Dropped (live only) |
+| Body joints | the 31 joints by name (`robot/joints.py`): q, dq, tau, both temperatures, mode/motorstate; `mode_machine`, `mode_pr`, `tick` in the title |
+| Hands | one row per finger joint, left hand then right (cyan): q, dq, tau, temperature (none for the position-only thumb), mode/motorstate; per hand: error, power, and the highest reading of each of the 16 pressure pads |
+| IMUs | pelvis (inside `rt/lf/lowstate`), torso (`rt/lf/secondary_imu`) and both hands: rpy, gyro, accel, temperature |
+| Battery | charge, health, voltage, current, cell min-max and spread, temperatures, cycles, raw state |
+| Main board | the 4 temperatures, fans, state, value |
 
-*One topic* (`watch TOPIC`): subscribes to that topic only and shows every value of its newest message, the raw data with no interpretation:
-- a status line: type, measured / expected Hz, time since the last message, dropped count (live only);
-- a **Field | Value** list of plain fields; nested ones are flattened with dots (`imu_state.rpy`);
-- a table per list of sub-messages, one row per slot (`motor_state`, `press_sensor_state`). Joint and finger slots are named from `robot/joints.py`; slots past the named ones show `(unused)`.
-
-It works for any message type without knowing it. `rt/lf/lowstate` and the hands are about 55 lines tall, so make the terminal tall enough; otherwise the bottom is cut off.
+It shows numbers only, never warnings: judging them is for checkup. A `?` marks a unit or meaning that isn't confirmed (see `docs/robot_findings.md`). A panel says "waiting for data..." until its topic's first message, and "(unexpected message shape)" instead of crashing on odd data.
 
 The 6 topics, about 280 messages/s in total, are what the dashboard draws: `rt/lf/lowstate` (body, 20 Hz), `rt/lf/secondary_imu` (torso IMU), `rt/lf/bmsstate` (battery), `rt/lf/mainboardstate` (board temperatures, fans), `rt/dex5/left/state` and `rt/dex5/right/state` (hands, 100 Hz).
 
 **Why only these topics.** Every message costs Python time to decode, even on a background thread. Subscribing to everything, including the ~1 kHz `rt/lowstate` and `rt/lowcmd`, overloads Python and makes the rates read low (the MVP saw `rt/lf/*` at 10 Hz instead of 20). So `watch` uses the 20 Hz `rt/lf/...` copies and leaves the fast topics out. The caption shows how many messages were **dropped** (live only); if that isn't 0, the loop fell behind and its numbers can't be trusted.
 
-**How the data flows.** A *source* hands out every message; each consumer keeps what it needs. The recorder writes all of them; the table counts every message for the rates and keeps only the newest per topic for the screen. The source is the robot (`LiveSource`) or, for `replay`, a recording (`ReplaySource`), behind the same interface.
+**How the data flows.** A *source* hands out every message; each consumer keeps what it needs. The recorder writes all of them; the rate meter counts every message; the dashboard keeps only the newest per topic for the screen. The source is the robot (`LiveSource`) or, for `replay`, a recording (`ReplaySource`), behind the same interface.
 
 ### Saved files
 
@@ -140,13 +134,13 @@ outputs/discovery/2026-11-23/snapshot_161435_eth10.json
 
 The time is when the run started. The interface in the name tells robot runs (`eth10`) apart from laptop tests. Every saved file gets its path from `h2_bridge/utils/output_paths.py`. You can choose the `<name>` part (letters, digits, `-`, `_`, `.`), but never the folder, so all results end up in this one place.
 
-The program's own state goes in `bridge/cache/` (also ignored by git), through `h2_bridge/utils/state_files.py`. Today that's `topics.json`, the topic cache: which DDS type each topic carries, learned from discovery runs. It's safe to delete; the next `discovery topics` rebuilds it.
+The program's own state goes in `bridge/cache/` (also ignored by git), through `h2_bridge/utils/state_files.py`. Today that's `topics.json`, the topic cache: which DDS type each topic carries, learned from discovery runs. It's safe to delete; the next `discovery topics` rebuilds it. **Nothing reads it right now:** it fed `telemetry watch TOPIC` (watching any topic by name), which was removed because many topics use types the Python SDK lacks. It's kept, and still updated, for when that feature comes back (`telemetry/topic_lookup.py` in git history).
 
 ### Output and exit codes
 
 - Results (tables) go to **stdout**. Spinners and messages go to **stderr**, so `> file` or `| less` only captures the results.
 - Exit codes: `0` success, `1` ran but found nothing (e.g. `watch` received no data, a topic can't be found, or `replay` can't read the file), `2` bad arguments, `130` stopped with Ctrl-C (`telemetry watch` and `replay` instead stop cleanly and exit `0`/`1`).
-- `telemetry watch`/`replay` redraw a live table in a terminal. Piped or redirected, they print only the final table.
+- `telemetry watch`/`replay` redraw a live dashboard in a terminal. Piped or redirected, they print only the final screen.
 
 ### Code layout
 
@@ -158,14 +152,13 @@ src/h2_bridge/
   cli/discovery_commands.py  # `discovery` commands  ->  calls h2_bridge.discovery
   cli/discovery_tables.py    # rich tables those commands print (one per kind of row)
   cli/telemetry_commands.py  # `telemetry` commands  ->  calls h2_bridge.telemetry
-  cli/telemetry_tables.py    # rich tables those commands print
-  cli/telemetry_summaries.py # the Summary column: one line per message type (the core 6)
+  cli/telemetry_dashboard.py # the live dashboard those commands draw (row extraction, then panels)
   discovery/        # discovery logic (no argparse):
                     #   models.py   = Snapshot dataclasses (the raw facts)
                     #   collect.py  = DDS -> Snapshot (the only discovery module that touches DDS)
                     #   snapshot_views.py = Snapshot -> views (group_by_topic, endpoints_by_participant, participant_ips)
                     #   snapshot_files.py = Snapshot <-> JSON in outputs/ (save_snapshot, load_snapshot)
-                    #   topic_cache.py = topic -> type, learned from snapshots (bridge/cache/topics.json)
+                    #   topic_cache.py = topic -> type, learned from snapshots (bridge/cache/topics.json); unused for now, kept for watching topics by name later
   telemetry/        # telemetry logic (no argparse):
                     #   models.py   = TopicSpec (a topic we read) and Message (one received message)
                     #   core_topics.py = CORE_TOPICS (SDK class, expected Hz)
@@ -173,7 +166,6 @@ src/h2_bridge/
                     #   sources/live_source.py = LiveSource: the robot over DDS (the only telemetry module that touches DDS)
                     #   sources/replay_source.py = ReplaySource: a recording, played back at its original pace
                     #   recording_format.py = the .jsonl.gz format: RecordingWriter, RecordingReader
-                    #   topic_lookup.py = topic names -> TopicSpecs (core, then the topic cache, then a short discovery run)
                     #   rate_meter.py = RateMeter (recent and average rates), latest()
   robot/            # robot facts, plain data (no telemetry imports):
                     #   joints.py  = body and hand slots -> joint names and limits

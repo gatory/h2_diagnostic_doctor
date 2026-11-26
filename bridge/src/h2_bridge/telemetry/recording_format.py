@@ -12,8 +12,8 @@ order, then a footer when the recording closes.
 avg_hz is each topic's average rate over the recording (None below 2 messages);
 footers written before it existed don't have it.
 
-No footer means the recorder died (power loss, kill -9). Plain .jsonl files
-(made before gzip) are still read. Files live in
+No footer means the recorder died (power loss, kill -9). Only .jsonl.gz is
+read: anything else is refused. Files live in
 outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl.gz (via utils/output_paths.py).
 """
 
@@ -32,6 +32,10 @@ FORMAT_VERSION = 1
 
 # gzip level: 6 shrinks recordings ~10x for ~1% of a core; 9 costs 4x the CPU for ~7% smaller.
 COMPRESS_LEVEL = 6
+
+# The only file type recordings use, for output_path() and find_outputs().
+EXTENSION = "jsonl.gz"
+EXTENSION_DOT = "." + EXTENSION
 
 _GZIP_MAGIC = b"\x1f\x8b"
 
@@ -60,7 +64,7 @@ class RecordingWriter:
         from h2_bridge.utils.output_paths import output_path
 
         started = datetime.now().astimezone()
-        self.path = output_path("telemetry", name, source.interface, when=started, ext="jsonl.gz")
+        self.path = output_path("telemetry", name, source.interface, when=started, ext=EXTENSION)
         self.count = 0
         self._source = source
         self._rates = RateMeter()  # its own, so the footer's rates never depend on the caller
@@ -122,7 +126,7 @@ class RecordingReader:
             reader.footer, reader.truncated    # how it ended, once next_message() returned None
 
     One line at a time, so long recordings never have to fit in memory. Reads
-    gzipped (.jsonl.gz) and plain (.jsonl) files. A file cut off mid-write (the
+    .jsonl.gz only (ValueError for anything else). A file cut off mid-write (the
     recorder was killed) ends early with `truncated` set; damage in the middle
     of a file raises.
 
@@ -211,10 +215,13 @@ class RecordingReader:
 
 
 def _open_text(path):
-    """Open a recording as text: gzipped or plain, told apart by its first bytes."""
+    """Open a .jsonl.gz recording as text; ValueError if it isn't one (checked by name and first bytes)."""
+    if not str(path).endswith(EXTENSION_DOT):
+        raise ValueError(f"{path}: not a recording (expected a {EXTENSION_DOT} file)")
     with open(path, "rb") as f:
-        gzipped = f.read(2) == _GZIP_MAGIC
-    return gzip.open(path, "rt", encoding="utf-8") if gzipped else open(path, encoding="utf-8")
+        if f.read(2) != _GZIP_MAGIC:
+            raise ValueError(f"{path}: named {EXTENSION_DOT} but isn't gzipped")
+    return gzip.open(path, "rt", encoding="utf-8")
 
 
 def _sdk_class(type_name):
