@@ -233,3 +233,16 @@ def test_motor_error_codes_decode():
     assert decode_motorstate(0) == []
     assert decode_motorstate(0x80000001) == ["Overcurrent", "Disconnection timeout (PC side)"]
     assert decode_motorstate(0x100000) == ["unknown bits 0x100000"]
+
+
+def test_remote_decodes_buttons_and_sticks():
+    import struct
+
+    from h2_bridge.robot.remote import decode_remote
+    raw = list(b"\x55\x51" + struct.pack("<H", 0x0220) + struct.pack("<5f", 0.0, -0.9, 0.0, 0.0, 0.5) + bytes(16))
+    remote = decode_remote(raw)
+    assert remote.connected and remote.buttons == ("L2", "B")
+    assert remote.rx == pytest.approx(-0.9) and remote.ly == pytest.approx(0.5)
+    assert not decode_remote([0] * 40).connected  # no controller: all zeros
+    with pytest.raises(ValueError):
+        decode_remote([0] * 39)

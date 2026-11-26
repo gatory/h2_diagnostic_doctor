@@ -82,3 +82,17 @@ From Unitree's H2 SDK Development Guide, "Basic Services Interface" (last update
 - **AB mode changes what `q` means.** In AB mode the parallel-linkage slots (ankle roll/pitch 4, 5, 10, 11 and waist roll/pitch 13, 14: `PR_LINKAGE_JOINTS` in `robot/joints.py`) report raw motor positions, not joint angles. Checkup's joint-limit rule skips them and its IMU-agreement rule reports no data in AB mode. All our recordings so far are in PR mode.
 - **The docs' `MotorState_` has fields our SDK's message doesn't**: `q_raw`, `dq_raw`, `ddq_raw` ("reserve"). The Python SDK in use is a different version of the message; nothing reads them.
 - **Motor error codes** (`motorstate` bits): 0x1 Overcurrent, 0x2 Transient Overvoltage, 0x4 Sustained Overvoltage, 0x8 Transient Undervoltage, 0x10 Chip Overheating, 0x20 MOS Overheating/Overcooling, 0x40 MOS Temperature Anomaly, 0x80 Housing Overheating/Overcooling, 0x100 Housing Temperature Anomaly, 0x200 Winding Overheating, 0x400 Rotor Encoder 1 Error, 0x800 Rotor Encoder 2 Error, 0x1000 Output Encoder Error, 0x2000 Calibration/BOOT Data Error, 0x4000 Abnormal Reset, 0x8000 Motor Lock / Master Control Authentication Error, 0x10000 Chip Verification Error, 0x20000 Calibration Mode Warning, 0x40000 Communication Check Error, 0x80000 Driver Version Too Low, 0x40000000 Disconnection timeout (motor side), 0x80000000 Disconnection timeout (PC side). The hands send the same `MotorState_` type, so the same bits most likely apply there (unconfirmed).
+
+## Remote controller: `LowState_.wireless_remote` (Unitree H2 SDK docs + our recordings)
+
+From Unitree's H2 SDK Development Guide, "Remote Control Data" (last updated 2026-05-29): the 40 raw bytes are an `xRockerBtnDataStruct`. Decoded by `decode_remote()` in `bridge/src/h2_bridge/robot/remote.py`; not shown on the dashboard or checked by checkup yet.
+
+| Bytes | Docs | Seen in our 2026-11-26 recordings |
+|---|---|---|
+| 0-1 | `head[2]` | **0x55 0x51 while a controller is connected**, all zeros when not (`recording_100548`, `limit_test`): a free "remote connected" signal |
+| 2-3 | buttons, uint16 little-endian, one bit each: R1, L1, start, select, R2, L2, F1, F2, A, B, X, Y, up, right, down, left (bit 0 to 15) | decodes to plausible presses: L2, L2+B, R2+Y, A, B, X, Y, up/down/left/right |
+| 4-23 | five float32 in this order: `lx`, `rx`, `ry`, `L2`, `ly`, each -1.0 to 1.0 | `rx` -0.91 to 0.90 and `ly` up to 0.88 when moved; `lx`, `ry` never moved; **`L2` stays 0.0 even with L2 held** (only its button bit is set) |
+| 24-39 | `idle[16]` | **not always 0: bytes 38 and 39 vary.** With only buttons held, byte 39 equals the two button bytes XORed (L2 0x20 -> 32, L2+B -> 0x22); otherwise it varies, and no simple XOR/sum checksum fits. *Open:* what bytes 38-39 are. |
+
+- The docs' conversion example reads `unitree_go::msg::dds_::LowState_` (it looks copied from the Go2 docs); on the H2 the message is `unitree_hg::msg::dds_::LowState_`, with the same `wireless_remote` field.
+- *Open:* the doc's diagram maps each button to the physical controller; our names are only the docs' field names. Pressing each button once while recording would confirm the bit order on the real controller.
