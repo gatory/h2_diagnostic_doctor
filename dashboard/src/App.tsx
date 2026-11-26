@@ -1,19 +1,18 @@
+import { useState } from 'react'
 import { RobotView } from './robot/RobotView'
+import { BottomNav } from './ui/BottomNav'
+import { MetricsPanel } from './ui/MetricsPanel'
 
 export default function App() {
+  const [panelOpen, setPanelOpen] = useState(true)
+
   return (
     <div className="app">
-      <nav className="top-nav">
-        <span className="wordmark">H2 DOCTOR</span>
-        <span className="nav-status">Sample data</span>
-      </nav>
       <main className="stage">
-        <RobotView />
-        <div className="hero">
-          <h1>H2</h1>
-          <p>Unitree H2 · no recording loaded</p>
-        </div>
+        <RobotView panelOpen={panelOpen} />
+        <MetricsPanel open={panelOpen} />
       </main>
+      <BottomNav panelOpen={panelOpen} onTogglePanel={() => setPanelOpen((open) => !open)} />
     </div>
   )
 }

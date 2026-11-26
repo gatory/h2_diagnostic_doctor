@@ -6,6 +6,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer, type CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js'
 import URDFLoader, { type URDFRobot, type URDFVisual } from 'urdf-loader'
+import { Backdrop } from './backdrop'
+import { blackenEyes } from './head'
 import { SAMPLE_MARKERS, createMarker } from './markers'
 
 const URDF_URL = '/renders/h2_description/H2.urdf'
@@ -15,6 +17,46 @@ const URDF_URL = '/renders/h2_description/H2.urdf'
 const SHELL = new THREE.MeshStandardMaterial({ color: 0xb0b3b7, roughness: 0.32, metalness: 0.75 })
 const JOINT = new THREE.MeshStandardMaterial({ color: 0x1c1d20, roughness: 0.6, metalness: 0.2 })
 const BLACK_LINKS = new Set(['waist_yaw_link', 'waist_roll_link']) // "white" in the URDF, black on the robot
+
+// Two framings, one per metrics-panel state. Panel open: the robot faces the camera, slid left
+// into the free 40% of the screen. Panel closed: a 45° side view from the robot's left, close
+// enough that the knees sit just below the frame. The camera flies in to the first framing once
+// the model has loaded, and glides between them when the panel toggles.
+const START_DISTANCE = 10
+const INTRO_MS = 2200
+const REFRAME_MS = 700
+
+// direction: from the target out to the camera (three.js axes: +X robot's front, -Z robot's left).
+// shiftX: how far the picture slides left, as a fraction of the view's width.
+type Framing = { targetY: number; distance: number; shiftX: number; direction: THREE.Vector3 }
+const FRAMING: Record<'panelOpen' | 'panelClosed', Framing> = {
+  panelOpen: {
+    targetY: 0.85,
+    distance: 2.9,
+    shiftX: 0.3,
+    direction: new THREE.Vector3(1, 0.1, -0.12).normalize(), // ~7° to the robot's left
+  },
+  // Frame spans ~0.65 m (just above the knees, 0.57 m) to ~1.9 m (head top 1.82 m).
+  panelClosed: {
+    targetY: 1.27,
+    distance: 1.75,
+    shiftX: 0,
+    direction: new THREE.Vector3(1, 0.1, -1).normalize(), // 45° to the robot's left
+  },
+}
+
+type CameraMove = {
+  fromTarget: THREE.Vector3
+  toTarget: THREE.Vector3
+  fromDistance: number
+  toDistance: number
+  fromShift: number
+  toShift: number
+  fromDirection: THREE.Vector3
+  toDirection: THREE.Vector3
+  start: number
+  ms: number
+}
 
 export type SceneStatus = { state: 'loading' } | { state: 'ready' } | { state: 'error'; message: string }
 
@@ -26,10 +68,15 @@ export class RobotScene {
   private markers: CSS2DObject[] = []
   private projected = new THREE.Vector3()
   private scene = new THREE.Scene()
+  private backdrop = new Backdrop()
   private camera = new THREE.PerspectiveCamera(40, 1, 0.05, 50)
   private controls: OrbitControls
   private resizeObserver: ResizeObserver
   private frame = 0
+  private framing = FRAMING.panelClosed
+  private move: CameraMove | null = null
+  private shiftX = 0
+  private direction = new THREE.Vector3() // scratch for camera moves
   private disposed = false
   private container: HTMLElement
 
@@ -42,7 +89,9 @@ export class RobotScene {
     container.appendChild(this.labelRenderer.domElement)
 
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.scene.background = new THREE.Color(0xf4f4f4) // surface-soft
+    this.scene.background = this.backdrop.background
+    this.scene.fog = this.backdrop.fog
+    this.scene.add(this.backdrop.group)
     // Soft studio reflections so the materials read as plastic and metal, not flat grey.
     const pmrem = new THREE.PMREMGenerator(this.renderer)
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
@@ -51,13 +100,9 @@ export class RobotScene {
     const sun = new THREE.DirectionalLight(0xffffff, 1.5)
     sun.position.set(3, 5, 2)
     this.scene.add(sun)
-    this.scene.add(new THREE.GridHelper(4, 20, 0xd0d1d2, 0xeeeeee)) // 20 cm squares, floor at y = 0
 
-    // Three.js is Y-up; we look at the robot's front (URDF +X) from slightly to its left.
-    this.camera.position.set(2.6, 1.3, 1.2)
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
-    this.controls.target.set(0, 0.9, 0)
-    this.controls.update()
+    this.placeForIntro()
 
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(container)
@@ -80,11 +125,13 @@ export class RobotScene {
     const finishIfLoaded = () => {
       if (this.disposed || failed || !robot || pendingMeshes > 0) return
       this.applyMaterials(robot)
+      blackenEyes(robot, SHELL)
       robot.rotation.x = -Math.PI / 2 // URDF is Z-up, three.js is Y-up
       this.scene.add(robot)
       robot.updateMatrixWorld(true)
       robot.position.y -= new THREE.Box3().setFromObject(robot).min.y // feet on the floor
       this.robot = robot
+      this.flyTo(this.framing, INTRO_MS)
       this.addMarkers(robot)
       onStatus({ state: 'ready' })
     }
@@ -146,18 +193,76 @@ export class RobotScene {
     }
   }
 
+  /** Reframe the robot for the metrics panel, and hide the markers while it's open. */
+  setPanelOpen(open: boolean) {
+    this.framing = open ? FRAMING.panelOpen : FRAMING.panelClosed
+    this.labelRenderer.domElement.classList.toggle('hidden', open)
+    if (this.robot) this.flyTo(this.framing, REFRAME_MS)
+    else this.placeForIntro() // not loaded yet: start the fly-in on this framing's line
+  }
+
+  private placeForIntro() {
+    this.controls.target.set(0, this.framing.targetY, 0)
+    this.camera.position.copy(this.controls.target).addScaledVector(this.framing.direction, START_DISTANCE)
+    this.controls.enabled = false // until the intro finishes
+    this.controls.update()
+  }
+
+  private flyTo(framing: Framing, ms: number) {
+    const offset = this.camera.position.clone().sub(this.controls.target)
+    const fromDistance = offset.length()
+    this.move = {
+      fromTarget: this.controls.target.clone(),
+      toTarget: new THREE.Vector3(0, framing.targetY, 0),
+      fromDistance,
+      toDistance: framing.distance,
+      fromShift: this.shiftX,
+      toShift: framing.shiftX,
+      fromDirection: offset.normalize(),
+      toDirection: framing.direction,
+      start: performance.now(),
+      ms,
+    }
+    this.controls.enabled = false // no dragging against the animation
+  }
+
+  private updateMove() {
+    const move = this.move
+    if (!move) return
+    const t = Math.min(1, (performance.now() - move.start) / move.ms)
+    const eased = 1 - (1 - t) ** 3 // fast start, gentle stop
+    this.controls.target.lerpVectors(move.fromTarget, move.toTarget, eased)
+    const distance = move.fromDistance + (move.toDistance - move.fromDistance) * eased
+    const direction = this.direction.lerpVectors(move.fromDirection, move.toDirection, eased).normalize()
+    this.camera.position.copy(this.controls.target).addScaledVector(direction, distance)
+    this.shiftX = move.fromShift + (move.toShift - move.fromShift) * eased
+    this.applyShift()
+    if (t === 1) {
+      this.move = null
+      this.controls.enabled = true
+    }
+  }
+
   private resize() {
     const { clientWidth: w, clientHeight: h } = this.container
     if (w === 0 || h === 0) return
     this.renderer.setSize(w, h)
     this.labelRenderer.setSize(w, h)
     this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
+    this.applyShift() // also updates the projection
+  }
+
+  /** Slide the rendered picture left without moving the camera, so orbiting still circles the robot. */
+  private applyShift() {
+    const { clientWidth: w, clientHeight: h } = this.container
+    if (this.shiftX === 0 || w === 0 || h === 0) this.camera.clearViewOffset()
+    else this.camera.setViewOffset(w, h, this.shiftX * w, 0, w, h)
   }
 
   private animate = () => {
     if (this.disposed) return
     this.frame = requestAnimationFrame(this.animate)
+    this.updateMove()
     this.controls.update()
     this.renderer.render(this.scene, this.camera)
     this.updateMarkerSides()
@@ -179,6 +284,7 @@ export class RobotScene {
       }
     })
     this.scene.environment?.dispose()
+    this.backdrop.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()
     this.labelRenderer.domElement.remove()
