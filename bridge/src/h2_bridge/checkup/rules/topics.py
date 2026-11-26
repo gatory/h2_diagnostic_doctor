@@ -48,7 +48,7 @@ TOPIC_FLOW = Rule(
     "topic_flow", "Topics arriving",
     "Each topic sends messages: not silent since the start, not stale, not below "
     f"{limits.RATE_OK:.0%} of its expected rate.",
-    check_topic_flow, hold_s=0.5, clear_s=1.0,
+    check_topic_flow, hold_s=0.0, clear_s=1.0,  # stale/slow already mean "for a while": flag at once
 )
 DROPPED = Rule(
     "dropped", "No dropped messages",

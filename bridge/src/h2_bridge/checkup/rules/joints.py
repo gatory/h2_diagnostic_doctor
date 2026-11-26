@@ -2,6 +2,7 @@
 
 from h2_bridge.checkup import limits
 from h2_bridge.checkup.models import Observation, Rule, Status
+from h2_bridge.checkup.rules.bands import band
 from h2_bridge.telemetry.snapshot import HANDS
 
 
@@ -39,11 +40,12 @@ def check_limits(snap, memory):
         past = max(j.q - j.upper, j.lower - j.q)  # > 0: past a limit; < 0: inside
         side = "upper" if j.q - j.upper > j.lower - j.q else "lower"
         limit = j.upper if side == "upper" else j.lower
-        if past > limits.JOINT_PAST_LIMIT:
+        status = band(memory, j.name, past, -limits.JOINT_AT_LIMIT, limits.JOINT_PAST_LIMIT, limits.JOINT_LIMIT_MARGIN)
+        if status == Status.FAIL:
             observations.append(Observation(j.name, Status.FAIL,
                                             f"forced past its {side} limit: q {j.q:+.3f}, limit {limit:+.3f} rad",
                                             past, limits.JOINT_PAST_LIMIT))
-        elif past > -limits.JOINT_AT_LIMIT:
+        elif status == Status.WARN:
             observations.append(Observation(j.name, Status.WARN,
                                             f"at its {side} limit: q {j.q:+.3f}, limit {limit:+.3f} rad",
                                             past, -limits.JOINT_AT_LIMIT))
@@ -68,22 +70,28 @@ def check_hand_frozen(snap, memory):
     """Per hand motor: warn if q stays bit-identical for HAND_FROZEN_S while the hand's messages keep arriving.
 
     Hands have no tick, so "a new message arrived" is the hand topic's message
-    count moving. Slots in HAND_FROZEN_IGNORE are skipped (one healthy thumb slot
-    never changes: docs/robot_findings.md).
+    count moving. A motor at either end of its range (within HAND_AT_STOP) is
+    skipped: at its stop q is clamped and never changes (a curled finger, the
+    right thumb resting on its stop: docs/robot_findings.md).
     """
     observations = []
     for side, hand in snap.hands.items():
         if not hand:
             continue
-        readings = [(f"{side}:{m.name}", m.q) for m in hand.motors
-                    if f"{side}:{m.name}" not in limits.HAND_FROZEN_IGNORE]
+        readings = [(f"{side}:{m.name}", None if _at_stop(m) else m.q) for m in hand.motors]
         count = snap.topics[HANDS[side]].count
         observations += _unchanged(memory.setdefault(side, {}), count, readings, snap.t, limits.HAND_FROZEN_S)
     return observations or None
 
 
+def _at_stop(motor):
+    """True if a hand motor sits at an end of its range, where its reading is clamped."""
+    return motor.q is not None and min(abs(motor.q - motor.lower), abs(motor.q - motor.upper)) <= limits.HAND_AT_STOP
+
+
 def _unchanged(memory, marker, readings, now, window):
-    """Observations for [(subject, q)]: warn once a q has been bit-identical for `window` seconds.
+    """Observations for [(subject, q)]: warn once a q has been bit-identical for `window` seconds
+    and at least FROZEN_MIN_SAMPLES new messages.
 
     `marker` changes whenever a new message arrived (a tick, a message count). While
     it doesn't, nothing new is judged and the last observations are returned as
@@ -92,19 +100,21 @@ def _unchanged(memory, marker, readings, now, window):
     if memory.get("marker") == marker:
         return memory.get("last") or []  # no new message: nothing new to judge
     memory["marker"] = marker
-    last = memory.setdefault("q", {})  # subject -> (q, since when unchanged)
+    last = memory.setdefault("q", {})  # subject -> (q, since when unchanged, how many samples since)
     observations = []
     for subject, q_now in readings:
-        if q_now is None:
-            last.pop(subject, None)  # joint_nan reports it
-            continue
-        q, since = last.get(subject, (None, now))
-        if q != q_now:
-            last[subject] = (q_now, now)
+        if q_now is None:  # NaN (joint_nan reports it), or a hand motor at its stop
+            last.pop(subject, None)
             observations.append(Observation(subject, Status.PASS))
             continue
+        q, since, samples = last.get(subject, (None, now, 0))
+        if q != q_now:
+            last[subject] = (q_now, now, 1)
+            observations.append(Observation(subject, Status.PASS))
+            continue
+        last[subject] = (q, since, samples + 1)
         unchanged = now - since
-        if unchanged >= window:
+        if unchanged >= window and samples + 1 >= limits.FROZEN_MIN_SAMPLES:
             observations.append(Observation(subject, Status.WARN, f"q unchanged for {unchanged:.1f} s (stuck reading?)",
                                             unchanged, window))
         else:
@@ -131,7 +141,7 @@ JOINT_LIMITS = Rule(
     "joint_limits", "Joints within limits",
     f"Each body joint stays inside its limits (robot/joints.py): warn when within {limits.JOINT_AT_LIMIT} rad "
     f"of a limit (at it), fail when more than {limits.JOINT_PAST_LIMIT} rad past it (forced beyond).",
-    check_limits, hold_s=0.25, clear_s=1.0,  # one poll: a joint at or past its stop should show at once
+    check_limits, hold_s=0.0, clear_s=0.0,  # instant; band()'s margin stops flicker
 )
 JOINT_FROZEN = Rule(
     "joint_frozen", "Joint readings change",
@@ -141,12 +151,12 @@ JOINT_FROZEN = Rule(
 )
 HAND_FROZEN = Rule(
     "hand_frozen", "Hand readings change",
-    f"No hand motor's q stays bit-identical for {limits.HAND_FROZEN_S:g} s while the hand's messages arrive. "
-    f"Skipped: {', '.join(sorted(limits.HAND_FROZEN_IGNORE)) or 'none'} (never changes on a healthy hand, open question).",
+    f"No hand motor's q stays bit-identical for {limits.HAND_FROZEN_S:g} s while the hand's messages arrive, "
+    f"except at an end of its range (within {limits.HAND_AT_STOP} rad), where the reading is clamped.",
     check_hand_frozen, hold_s=0.0, clear_s=0.5,
 )
 MOTOR_ERRORS = Rule(
     "motor_errors", "No motor error bits",
     "motorstate is 0 on every body and hand motor.",
-    check_motor_errors, hold_s=0.5, clear_s=2.0,
+    check_motor_errors, hold_s=0.0, clear_s=1.0,  # error bits are a fact: flag at once
 )

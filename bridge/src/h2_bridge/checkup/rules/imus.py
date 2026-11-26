@@ -2,6 +2,7 @@
 
 from h2_bridge.checkup import limits
 from h2_bridge.checkup.models import Observation, Rule, Status
+from h2_bridge.checkup.rules.bands import band
 
 # Body slots of the waist joints (robot/joints.py) and rpy indices they turn.
 _WAIST = {"roll": (13, 0), "pitch": (14, 1)}  # axis -> (body slot, rpy index)
@@ -22,13 +23,12 @@ def check_imu_agreement(snap, memory):
             continue  # joint_nan reports a NaN joint
         residual = abs(pelvis[i] - torso[i] + waist)
         subject = f"IMU {axis}"
-        if residual > limits.IMU_RESIDUAL_FAIL:
-            status, limit = Status.FAIL, limits.IMU_RESIDUAL_FAIL
-        elif residual > limits.IMU_RESIDUAL_WARN:
-            status, limit = Status.WARN, limits.IMU_RESIDUAL_WARN
-        else:
+        status = band(memory, subject, residual, limits.IMU_RESIDUAL_WARN, limits.IMU_RESIDUAL_FAIL,
+                      limits.IMU_RESIDUAL_MARGIN)
+        if status == Status.PASS:
             observations.append(Observation(subject, Status.PASS, value=residual))
             continue
+        limit = limits.IMU_RESIDUAL_FAIL if status == Status.FAIL else limits.IMU_RESIDUAL_WARN
         observations.append(Observation(subject, status,
                                         f"pelvis and torso disagree by {residual:.3f} rad beyond the waist joint",
                                         residual, limit))
@@ -39,5 +39,5 @@ IMU_AGREEMENT = Rule(
     "imu_agreement", "Body IMUs agree",
     f"pelvis - torso in roll and pitch matches the waist joints to within {limits.IMU_RESIDUAL_WARN} rad "
     f"(fail at {limits.IMU_RESIDUAL_FAIL}).",
-    check_imu_agreement, hold_s=1.0, clear_s=2.0,
+    check_imu_agreement, hold_s=1.0, clear_s=1.0,  # kept: the two IMUs' messages are ms apart, so one snapshot can disagree in fast motion
 )

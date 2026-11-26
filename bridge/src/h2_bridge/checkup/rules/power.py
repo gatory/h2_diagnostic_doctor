@@ -2,6 +2,7 @@
 
 from h2_bridge.checkup import limits
 from h2_bridge.checkup.models import Observation, Rule, Status
+from h2_bridge.checkup.rules.bands import band
 
 
 def check_cell_spread(snap, memory):
@@ -9,12 +10,11 @@ def check_cell_spread(snap, memory):
     if not snap.battery:
         return None
     spread = snap.battery.cell_spread
-    if spread >= limits.CELL_SPREAD_FAIL_MV:
-        status, limit = Status.FAIL, limits.CELL_SPREAD_FAIL_MV
-    elif spread >= limits.CELL_SPREAD_WARN_MV:
-        status, limit = Status.WARN, limits.CELL_SPREAD_WARN_MV
-    else:
+    status = band(memory, "battery", spread, limits.CELL_SPREAD_WARN_MV, limits.CELL_SPREAD_FAIL_MV,
+                  limits.CELL_SPREAD_MARGIN_MV)
+    if status == Status.PASS:
         return [Observation("battery", Status.PASS, value=spread)]
+    limit = limits.CELL_SPREAD_FAIL_MV if status == Status.FAIL else limits.CELL_SPREAD_WARN_MV
     return [Observation("battery", status, f"cell spread {spread} mV ({snap.battery.cell_min}-{snap.battery.cell_max})",
                         spread, limit)]
 
@@ -24,12 +24,10 @@ def check_charge(snap, memory):
     if not snap.battery:
         return None
     soc = snap.battery.soc
-    if soc <= limits.SOC_FAIL:
-        status, limit = Status.FAIL, limits.SOC_FAIL
-    elif soc <= limits.SOC_WARN:
-        status, limit = Status.WARN, limits.SOC_WARN
-    else:
+    status = band(memory, "battery", soc, limits.SOC_WARN, limits.SOC_FAIL, limits.SOC_MARGIN, higher_is_bad=False)
+    if status == Status.PASS:
         return [Observation("battery", Status.PASS, value=soc)]
+    limit = limits.SOC_FAIL if status == Status.FAIL else limits.SOC_WARN
     return [Observation("battery", status, f"charge {soc}%", soc, limit)]
 
 
@@ -45,15 +43,15 @@ CELL_SPREAD = Rule(
     "cell_spread", "Battery cells balanced",
     f"The battery's cells are within {limits.CELL_SPREAD_WARN_MV} mV of each other (fail at "
     f"{limits.CELL_SPREAD_FAIL_MV}).",
-    check_cell_spread, hold_s=2.0, clear_s=5.0,
+    check_cell_spread, hold_s=0.0, clear_s=0.0,  # instant; band()'s margin stops flicker
 )
 CHARGE = Rule(
     "charge", "Battery charged",
     f"State of charge above {limits.SOC_WARN}% (fail at or below {limits.SOC_FAIL}%).",
-    check_charge, hold_s=2.0, clear_s=5.0,
+    check_charge, hold_s=0.0, clear_s=0.0,  # instant; band()'s margin stops flicker
 )
 HAND_ERRORS = Rule(
     "hand_errors", "No hand errors",
     "Each Dex5 hand's error field is all 0.",
-    check_hand_errors, hold_s=0.5, clear_s=2.0,
+    check_hand_errors, hold_s=0.0, clear_s=1.0,  # an error code is a fact: flag at once
 )
