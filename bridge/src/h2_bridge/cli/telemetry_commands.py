@@ -26,11 +26,12 @@ examples:
 core topics: rt/lf/lowstate, rt/lf/secondary_imu, rt/lf/bmsstate, rt/lf/mainboardstate,
              rt/dex5/left/state, rt/dex5/right/state
 
-dashboard (needs a terminal of about 155 x 50):
+dashboard (about 190 x 46 for full warning messages; at 175 they're cut short, below ~160 hidden):
   Topics       per topic: Hz over the last 2 s / expected, in checkup's verdict color (green:
                on rate, yellow: slow, red: silent or stale), Avg since the start, Last
                message age, Dropped
-  Warnings     checkup's current findings, worst first (the same rules as `h2-doctor checkup`)
+  Warnings     right of the hands: checkup's current findings, worst first (the same rules as
+               `h2-doctor checkup`)
   Body joints  31 joints: q, dq, tau, both temperatures, mode, motorstate
   Hands        20 motors each (thumb: position only), pressure max per pad, error, power
   IMUs         pelvis, torso and both hands: rpy, gyro, accel, temperature
