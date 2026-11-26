@@ -3,15 +3,15 @@
     dashboard(snapshot, checkup)   -> one rich renderable, redrawn each poll
                                      (telemetry.snapshot.Snapshot, checkup.engine.Checkup or None)
 
-Layout (about 155 x 50; on a smaller terminal it gets cut off at the right and bottom):
+Layout (about 190 x 46 to show the warnings' full messages; narrower, they get cut short):
 
-    ┌ Topics (row per topic) ┬ Battery ────┬ Warnings (checkup's findings) ┐
-    │                        ├ Main board ─┤                               │
-    ├ Body joints (31) ──────┼ Hands: joint x left │ right ────────────────┤
-    │                        ├ IMUs: pelvis · torso · hands ────────────────┤
+    ┌ Topics (row per topic) ┬ Battery ─────┬ Main board ┐
+    ├ Body joints (31) ──────┼ Hands: joint x left │ right ┬ Warnings ┐
+    │                        ├ IMUs: pelvis · torso · hands ┤ (checkup) │
 
 Every panel is as wide as its content (no stretching), so values sit next to
 their labels; the hands and IMUs panels share one column and so one width.
+The Warnings panel takes whatever width is left on the right.
 
 Presentation only: each function takes telemetry data and returns rich objects;
 printing (or redrawing it live) is up to the caller (cli/telemetry_commands.py).
@@ -48,34 +48,34 @@ RIGHT = "dodger_blue1"  # the right hand's values; clearly blue, not the HEADER 
 # Checkup verdicts: the color of a topic's rate, and of a finding's status in the Warnings panel.
 VERDICT = {Status.PASS: "green", Status.WARN: "yellow", Status.FAIL: "bold red"}
 
-# The Warnings panel lists at most this many findings (worst first), then "and N more".
-_MAX_WARNINGS = 10
+# The Warnings panel lists at most this many findings (worst first), then "and N more":
+# about as many as fit beside the hands and IMUs.
+_MAX_WARNINGS = 30
 
 _WAITING = f"[{DIM}]waiting for data...[/]"
 
 
 def dashboard(snap, checkup=None):
     """The whole screen for one Snapshot; `checkup` (the engine, run on the same snapshots) gives the verdicts."""
-    power = Table.grid()  # one column: battery over main board, at the same width
-    power.add_row(_safe(_battery_panel, "Battery", snap.battery, BATTERY in snap.bad))
-    power.add_row(_safe(_board_panel, "Main board", snap.board, MAIN_BOARD in snap.bad))
-
-    # Grids without expand or ratios: each column is as wide as its widest panel;
-    # only the Warnings panel takes whatever width is left.
-    top = Table.grid(padding=(0, 1), expand=True)
-    top.add_column()
-    top.add_column()
-    top.add_column(ratio=1)
-    top.add_row(_topics_panel(snap, checkup), power, _warnings_panel(checkup))
+    # Grids without expand or ratios: each column is as wide as its widest panel.
+    top = Table.grid(padding=(0, 1))
+    top.add_row(_topics_panel(snap, checkup),
+                _safe(_battery_panel, "Battery", snap.battery, BATTERY in snap.bad),
+                _safe(_board_panel, "Main board", snap.board, MAIN_BOARD in snap.bad))
 
     right = Table.grid()  # one column: the hands and IMUs panels get the same width
     right.add_row(_hands_panel(snap))
     right.add_row(_imu_panel(snap))
 
-    middle = Table.grid(padding=(0, 1))
+    # Body and hands keep their natural widths (their numbers never get cut); the
+    # Warnings panel on the right takes what's left, shortening its messages if it must.
+    middle = Table.grid(padding=(0, 1), expand=True)
+    middle.add_column()
+    middle.add_column()
+    middle.add_column(ratio=1, min_width=24)
     # The body panel draws its rows with dashes before data, so it keeps its width and
     # the hands and IMUs don't jump sideways when the first message arrives.
-    middle.add_row(_body_panel(snap.body, LOWSTATE in snap.bad), right)
+    middle.add_row(_body_panel(snap.body, LOWSTATE in snap.bad), right, _warnings_panel(checkup))
 
     return Group(top, middle)
 
@@ -138,11 +138,14 @@ def _warnings_panel(checkup):
         return Panel(body, title=title, title_align="left",
                      subtitle=_legend("from checkup's rules"), subtitle_align="left")
     table = Table.grid(padding=(0, 1))
-    table.add_column(no_wrap=True)  # status
-    table.add_column(style=LABEL, no_wrap=True)  # subject
-    table.add_column(overflow="ellipsis", no_wrap=True)  # message
+    # Status and subject share one column at full width (rich would drop a narrow status
+    # column first when space runs out); only the message is shortened ("...").
+    subject_width = max(len(f.subject.removeprefix("rt/")) for f in findings)
+    table.add_column(no_wrap=True, min_width=5 + subject_width)  # "FAIL lf/lowstate"
+    table.add_column(overflow="ellipsis", no_wrap=True, ratio=1)  # message
     for f in findings[:_MAX_WARNINGS]:
-        table.add_row(f"[{VERDICT[f.status]}]{f.status.value.upper()}[/]", f.subject.removeprefix("rt/"), f.message)
+        subject = f.subject.removeprefix("rt/").ljust(subject_width)
+        table.add_row(f"[{VERDICT[f.status]}]{f.status.value.upper()}[/] [{LABEL}]{subject}[/]", f.message)
     extra = len(findings) - _MAX_WARNINGS
     parts = [table] + ([f"[{DIM}]... and {extra} more[/]"] if extra > 0 else [])
     worst = VERDICT[findings[0].status]
