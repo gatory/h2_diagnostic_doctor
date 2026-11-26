@@ -5,6 +5,11 @@ original gaps (scaled by `speed`) and its original timestamps. now() runs on
 the recording's clock, so ages and rates measured on a replay match the live
 run. Reading the file (one line at a time, .jsonl.gz only, cut off or not)
 is RecordingReader's job; this class only decides when each message is due.
+
+With `step_s`, the clock doesn't follow the wall clock at all: each poll()
+moves it on by exactly step_s. A whole recording then runs as fast as the
+consumers can go, yet every poll still sees the same batch, rates and ages a
+live poll every step_s would (checkup --replay, and the tests, use this).
 """
 
 import time
@@ -14,7 +19,7 @@ from h2_bridge.telemetry.sources.base_source import Source
 
 
 class ReplaySource(Source):
-    """Recording `path` at `speed` x real time: every topic it holds.
+    """Recording `path` at `speed` x real time, or stepped by `step_s` per poll: every topic it holds.
 
     Attributes
     ----------
@@ -29,11 +34,16 @@ class ReplaySource(Source):
 
     live = False
 
-    def __init__(self, path, speed=1.0):
+    def __init__(self, path, speed=1.0, step_s=None):
         if speed <= 0:
             raise ValueError(f"speed must be > 0, got {speed}")
+        if step_s is not None and step_s <= 0:
+            raise ValueError(f"step_s must be > 0, got {step_s}")
         self.path = path
         self.speed = speed
+        self.step_s = step_s
+        self._steps = 0  # polls so far, for the stepped clock
+        self._polled_to = None  # the clock as of the latest poll(): what now() returns
         self.done = False
         self._started = None
         self._reader = RecordingReader(path)  # OSError / ValueError: missing file, not a recording
@@ -55,7 +65,12 @@ class ReplaySource(Source):
     def poll(self):
         """Every message due by now on the playback clock, oldest first. Starts playback if needed."""
         self.start()
-        end = self.now()
+        if self.step_s is not None:
+            self._steps += 1
+            end = self._first_t + self._steps * self.step_s
+        else:
+            end = self._first_t + (time.monotonic() - self._started) * self.speed
+        self._polled_to = end
         due = []
         while self._next is not None and self._next.t <= end:
             due.append(self._next)
@@ -68,16 +83,19 @@ class ReplaySource(Source):
     def now(self):
         """Where playback is, in recording time (same units as Message.t).
 
+        The clock only moves when poll() runs: now() is the time poll() last
+        delivered up to, so it always matches the batch just handed out (at
+        high speed, the wall clock runs on while a big batch is converted).
         Stops at the last message once the recording is done, so the final
         state shows as the recording ended, not as gone stale.
         """
         if self._first_t is None:  # empty recording
             return 0.0
-        if self._started is None:
-            return self._first_t
         if self.done:
             return self._last_t
-        return self._first_t + (time.monotonic() - self._started) * self.speed
+        if self._polled_to is None:  # not polled yet
+            return self._first_t
+        return self._polled_to
 
     @property
     def header(self):

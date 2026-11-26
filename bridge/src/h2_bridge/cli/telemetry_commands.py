@@ -6,10 +6,10 @@
     h2-doctor telemetry replay                # play the newest recording back
     h2-doctor telemetry replay FILE -s 4      # a given one, 4x faster
 
-Both commands run the same loop (_play): poll the source ~4 times a second and
-hand every batch to each consumer (the rate meter, the recorder, the live
-dashboard). This module only parses arguments and drives that loop; the logic
-is in h2_bridge.telemetry and the screen in telemetry_dashboard.py.
+Both commands run the one poll loop (telemetry/poll_loop.py) with their
+consumers: the rate meter, the recorder (watch --record) and the live
+dashboard. This module only parses arguments and picks the consumers; the
+logic is in h2_bridge.telemetry and the screen in telemetry_tables.py.
 """
 
 import argparse
@@ -26,9 +26,12 @@ examples:
 core topics: rt/lf/lowstate, rt/lf/secondary_imu, rt/lf/bmsstate, rt/lf/mainboardstate,
              rt/dex5/left/state, rt/dex5/right/state
 
-dashboard (needs a terminal of about 155 x 46):
-  Topics       per topic: Hz over the last 2 s / expected (green: on rate, yellow: slow,
-               red: silent or stale), Avg since the start, Last message age, Dropped
+dashboard (about 190 x 46 for full warning messages; at 175 they're cut short, below ~160 hidden):
+  Topics       per topic: Hz over the last 2 s / expected, in checkup's verdict color (green:
+               on rate, yellow: slow, red: silent or stale), Avg since the start, Last
+               message age, Dropped
+  Warnings     right of the hands: checkup's current findings, worst first (the same rules as
+               `h2-doctor checkup`)
   Body joints  31 joints: q, dq, tau, both temperatures, mode, motorstate
   Hands        20 motors each (thumb: position only), pressure max per pad, error, power
   IMUs         pelvis, torso and both hands: rpy, gyro, accel, temperature
@@ -44,12 +47,10 @@ examples:
 
 FILE is a .jsonl.gz recording made by `telemetry watch --record`; without it,
 the newest one in outputs/telemetry/ is played.
+The Warnings panel runs checkup's rules live; at a high --speed they see few
+polls and can miss short problems: `h2-doctor checkup --replay` is the full check.
 Needs no robot or network.
 """
-
-# How often the loop polls the source (and redraws the table).
-POLL_SECS = 0.25
-
 
 def register(commands):
     """Add the `telemetry` group to the root parser's subcommands."""
@@ -202,69 +203,49 @@ def _cmd_replay(args):
 
 
 def _play(source, recorder, duration, show_table):
-    """Run the loop on `source` with its consumers; return the RateMeter.
+    """Run the poll loop on `source` with this command's consumers; return the RateMeter.
 
-    Every batch goes to the rate meter (always, so rates exist even with
-    --quiet), the recorder (if any) and, with `show_table`, the live dashboard:
-    rates from every message, values from the newest per topic. The meter's
-    `total` is the message count per topic.
+    Consumers, in order: the snapshot builder (always: it feeds the rate meter,
+    so rates exist even with --quiet), the recorder (if any) and, with
+    `show_table`, checkup's engine and the live dashboard, which draws the
+    builder's snapshot with checkup's verdicts. The meter's `total` is the
+    message count per topic.
     """
     from rich.console import Console
     from rich.live import Live
 
-    from h2_bridge.cli import telemetry_tables
-    from h2_bridge.telemetry.rate_meter import RateMeter, latest
+    from h2_bridge.checkup.engine import Checkup
+    from h2_bridge.telemetry.poll_loop import run
+    from h2_bridge.telemetry.snapshot import SnapshotBuilder
 
-    meter = RateMeter()
-    newest = {}  # topic -> newest Message so far
-    dropped = source.dropped  # None for a replay: it can't drop
-
-    def draw(now):
-        return telemetry_tables.dashboard(source.topics, newest, meter, dropped, now)
-
-    def on_poll(messages, now):
-        meter.add(messages)  # every message, table or not
-        if recorder:
-            recorder.write(messages)
-        if show_table:
-            newest.update(latest(messages))  # only the newest, for display
-            live.update(draw(now), refresh=True)
-
+    builder = SnapshotBuilder(source.topics, source.dropped)
+    consumers = [builder] + ([recorder] if recorder else [])
     if not show_table:
-        _run(source, duration, on_poll)
-        return meter
-    with Live(draw(source.now()), console=Console(), auto_refresh=False) as live:
-        _run(source, duration, on_poll)
-    return meter
+        run(source, consumers, duration)
+        return builder.meter
+    checkup = Checkup(builder)
+    dashboard = _Dashboard(builder, checkup)
+    with Live(dashboard.render(source.now()), console=Console(), auto_refresh=False) as live:
+        dashboard.live = live
+        run(source, consumers + [checkup, dashboard], duration)
+    return builder.meter
 
 
-def _run(source, duration, on_poll):
-    """Poll `source` until `duration` (None: forever), Ctrl-C, or the source is done.
+class _Dashboard:
+    """Poll-loop consumer that redraws the live dashboard after every batch."""
 
-    Calls on_poll(messages, now) after each poll, with `now` read right then on
-    the source's clock. Ctrl-C only sets a flag, so it can never land halfway
-    through writing a line; a second Ctrl-C stops at once.
-    """
-    import signal
-    import time
+    def __init__(self, builder, checkup):
+        self.builder = builder  # both must come before this in the consumer list
+        self.checkup = checkup
+        self.live = None  # the rich Live it draws into, set once it's open
 
-    stop = False
+    def add(self, messages, now):
+        self.live.update(self.render(now), refresh=True)
 
-    def on_ctrl_c(signum, frame):
-        nonlocal stop
-        if stop:  # second Ctrl-C: give up waiting
-            raise KeyboardInterrupt
-        stop = True
+    def render(self, now):
+        from h2_bridge.cli import telemetry_tables
 
-    end = None if duration is None else time.monotonic() + duration
-    previous = signal.signal(signal.SIGINT, on_ctrl_c)
-    try:
-        while not stop and not source.done and (end is None or time.monotonic() < end):
-            time.sleep(POLL_SECS)
-            messages = source.poll()
-            on_poll(messages, source.now())
-    finally:
-        signal.signal(signal.SIGINT, previous)
+        return telemetry_tables.dashboard(self.builder.snapshot(now), self.checkup)
 
 
 def _print_summary(err, topics, meter, dropped, recorder, recorded_hz=None):

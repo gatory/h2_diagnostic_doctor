@@ -53,8 +53,14 @@ BODY_JOINTS = [
 ]
 NUM_BODY_JOINTS = len(BODY_JOINTS)  # 31
 
-# TODO: not sure about this will need to look into it further
-# PR_LINKAGE_JOINTS = frozenset({4, 5, 10, 11, 13, 14})
+# Body slots driven by a parallel mechanism (two motors via rods): the ankles' roll
+# and pitch, and the waist's roll and pitch. Unitree's H2 SDK docs ("Basic Services
+# Interface", LowState_.mode_pr): "Parallel mechanism (Ankles and waist) Control Mode,
+# 0: PR, 1: AB". In PR mode their q is the joint angle; in AB mode it's a raw motor
+# position, not an angle, so limits and angle-based checks don't apply to them.
+PR_LINKAGE_JOINTS = frozenset({4, 5, 10, 11, 13, 14})
+MODE_PR = 0  # LowState_.mode_pr: joint angles (the default)
+MODE_AB = 1  # LowState_.mode_pr: raw motor positions for PR_LINKAGE_JOINTS
 
 # ---------------------------------------------------------------- Hands (rt/dex5/*/state)
 # Dex5-1P: spec sheet, details can be found in docs/robot_findings.md.
