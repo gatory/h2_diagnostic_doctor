@@ -26,7 +26,7 @@ examples:
 core topics: rt/lf/lowstate, rt/lf/secondary_imu, rt/lf/bmsstate, rt/lf/mainboardstate,
              rt/dex5/left/state, rt/dex5/right/state
 
-dashboard (needs a terminal of about 160 x 50):
+dashboard (needs a terminal of about 155 x 46):
   Topics       per topic: Hz over the last 2 s / expected (green: on rate, yellow: slow,
                red: silent or stale), Avg since the start, Last message age, Dropped
   Body joints  31 joints: q, dq, tau, both temperatures, mode, motorstate
@@ -212,7 +212,7 @@ def _play(source, recorder, duration, show_table):
     from rich.console import Console
     from rich.live import Live
 
-    from bridge.src.h2_bridge.cli import telemetry_tables
+    from h2_bridge.cli import telemetry_tables
     from h2_bridge.telemetry.rate_meter import RateMeter, latest
 
     meter = RateMeter()

@@ -104,7 +104,7 @@ The core topics are recorded. The file is flushed about 4 times a second, so a c
 
 **`replay`** plays the newest `.jsonl.gz` in `outputs/telemetry/` (or `FILE`, if given) at its recorded pace (`-s/--speed` to change it) in the same dashboard as `watch`. Rates and ages run on the recording's clock, so they match the live run at any speed; the clock stops at the last message. At the end it prints each topic's average rate in the replay next to the one saved when it was recorded (they should match), and says whether the recording closed cleanly (footer) or was cut off.
 
-**The live dashboard** (`cli/telemetry_dashboard.py`) shows every core topic on one screen. It needs a terminal of about **160 x 50**; a smaller one cuts off the right and bottom.
+**The live dashboard** (`cli/telemetry_tables.py`) shows every core topic on one screen: topics, battery and main board across the top, then the body joints beside the hands and IMUs. Each panel is as wide as its content. It needs a terminal of about **155 x 46**; a smaller one cuts off the right and bottom.
 
 | Panel | What it shows |
 |---|---|
