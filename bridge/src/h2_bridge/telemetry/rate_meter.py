@@ -37,8 +37,8 @@ class RateMeter:
         self._first = {}  # topic -> time of its first message
         self._last = {}  # topic -> time of its newest message
 
-    def add(self, messages):
-        """Count a batch of messages (oldest first)."""
+    def add(self, messages, now=None):
+        """Count a batch of messages (oldest first). `now` is unused: it makes this a poll-loop consumer."""
         for m in messages:
             times = self._times[m.topic]
             times.append(m.t)

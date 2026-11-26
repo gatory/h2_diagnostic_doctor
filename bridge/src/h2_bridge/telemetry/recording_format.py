@@ -84,6 +84,10 @@ class RecordingWriter:
         }
         self._write_line(header)
 
+    def add(self, messages, now=None):
+        """Poll-loop consumer: write() each batch."""
+        self.write(messages)
+
     def write(self, messages):
         """Append `messages` (one poll's worth) and flush, so a crash loses at most this batch."""
         for m in messages:
