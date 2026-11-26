@@ -140,7 +140,7 @@ It listens to the core topics (or replays a recording), runs every rule on each 
 | Topics arriving | each topic: not silent 3 s after the start, not stale (no message for 5 periods, at least 0.5 s), not below 80% of its expected rate | fail / fail / warn |
 | No dropped messages | the live source kept up (no data for a replay) | warn |
 | No NaN joint readings | q, dq, tau of every body and hand motor are real numbers | fail |
-| Joints within limits | body q at most 0.02 rad past its limit in `robot/joints.py` (warn), 0.10 rad (fail). Hands: not checked, their zero is unconfirmed | warn / fail |
+| Joints within limits | body q **at** a limit in `robot/joints.py` (within 0.02 rad of it): warn; **forced past** it (more than 0.02 rad beyond): fail. Shows within one poll. `head_pitch` rests on its stop, so it warns whenever the head is fully down. Hands: not checked, their zero is unconfirmed | warn / fail |
 | Joint readings change | no body q bit-identical for 5 s while messages arrive | warn |
 | Hand readings change | no hand motor q bit-identical for 5 s while that hand's messages arrive. The right `thumb_base_swing` is left out (`HAND_FROZEN_IGNORE`): it never changes on a healthy hand, an open question | warn |
 | No motor error bits | `motorstate` is 0 on every motor (what each bit means is unknown) | warn |

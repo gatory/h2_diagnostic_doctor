@@ -123,16 +123,28 @@ def test_the_left_out_thumb_slot_may_stay_frozen():
     assert bad_rules(check(seconds=10.0, tweak=freeze_thumb)[1]) == {}
 
 
-def test_joint_past_its_limit_warns_then_fails():
+def test_joint_at_its_limit_warns_and_forced_past_it_fails():
     upper = 2.53025  # L_knee's upper limit (robot/joints.py)
-    def knee(past):
+    def knee(offset):
         def tweak(topic, t, data):
-            if topic == "rt/lf/lowstate":  # past the limit, with noise so it isn't also "frozen"
-                data["motor_state"][3]["q"] = upper + past + 0.001 * ((t - START) * 20 % 3)
+            if topic == "rt/lf/lowstate":  # offset from the limit, with noise so it isn't also "frozen"
+                data["motor_state"][3]["q"] = upper + offset + 0.001 * ((t - START) * 20 % 3)
         return tweak
-    assert bad_rules(check(tweak=knee(0.01))[1]) == {}  # within the noise allowance (head_pitch rests 0.003 past)
-    assert bad_rules(check(tweak=knee(0.05))[1]) == {"joint_limits": Status.WARN}
-    assert bad_rules(check(tweak=knee(0.2))[1]) == {"joint_limits": Status.FAIL}
+    assert bad_rules(check(tweak=knee(-0.05))[1]) == {}  # 0.05 inside: fine (the closest a healthy joint came)
+    assert bad_rules(check(tweak=knee(-0.01))[1]) == {"joint_limits": Status.WARN}  # at the limit
+    assert bad_rules(check(tweak=knee(0.005))[1]) == {"joint_limits": Status.WARN}  # on the stop, within the noise
+    _, results = check(tweak=knee(0.1))  # forced 0.1 rad past it
+    assert bad_rules(results) == {"joint_limits": Status.FAIL}
+    assert "forced past its upper limit" in results["joint_limits"].bad[0][1].message
+
+
+def test_a_joint_reaching_its_limit_shows_within_half_a_second():
+    def push_elbow(topic, t, data):
+        if topic == "rt/lf/lowstate" and after(3)(t):
+            data["motor_state"][18]["q"] = 3.0717795 + 0.05 + 0.001 * ((t - START) * 20 % 3)  # L_elbow past its limit
+    _, results = check(tweak=push_elbow)
+    _, _, first, _ = results["joint_limits"].bad[0]
+    assert first - START == pytest.approx(3.0, abs=0.3)  # counted from when it started
 
 
 def test_motor_error_bits_warn():

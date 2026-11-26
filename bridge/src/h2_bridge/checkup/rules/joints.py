@@ -25,24 +25,30 @@ def check_nan(snap, memory):
 
 
 def check_limits(snap, memory):
-    """Per body joint: how far q is past its limit (robot/joints.py). Hands: their q's zero is unchecked."""
+    """Per body joint: warn when q is at a limit (robot/joints.py), fail when it's forced past it.
+
+    past = how far q is beyond its nearest limit (negative: inside). Hands aren't
+    checked: whether their q uses the spec's zero is unconfirmed.
+    """
     if not snap.body:
         return None
     observations = []
     for j in snap.body.joints:
         if j.q is None:
             continue  # check_nan reports it
-        past = max(j.q - j.upper, j.lower - j.q)  # > 0: past a limit
-        if past > limits.JOINT_PAST_LIMIT_FAIL:
-            status = Status.FAIL
-        elif past > limits.JOINT_PAST_LIMIT_WARN:
-            status = Status.WARN
+        past = max(j.q - j.upper, j.lower - j.q)  # > 0: past a limit; < 0: inside
+        side = "upper" if j.q - j.upper > j.lower - j.q else "lower"
+        limit = j.upper if side == "upper" else j.lower
+        if past > limits.JOINT_PAST_LIMIT:
+            observations.append(Observation(j.name, Status.FAIL,
+                                            f"forced past its {side} limit: q {j.q:+.3f}, limit {limit:+.3f} rad",
+                                            past, limits.JOINT_PAST_LIMIT))
+        elif past > -limits.JOINT_AT_LIMIT:
+            observations.append(Observation(j.name, Status.WARN,
+                                            f"at its {side} limit: q {j.q:+.3f}, limit {limit:+.3f} rad",
+                                            past, -limits.JOINT_AT_LIMIT))
         else:
             observations.append(Observation(j.name, Status.PASS))
-            continue
-        side = "upper" if j.q > j.upper else "lower"
-        observations.append(Observation(j.name, status, f"q {j.q:+.3f} rad is {past:.3f} past its {side} limit",
-                                        past, limits.JOINT_PAST_LIMIT_WARN))
     return observations
 
 
@@ -123,9 +129,9 @@ JOINT_NAN = Rule(
 )
 JOINT_LIMITS = Rule(
     "joint_limits", "Joints within limits",
-    f"Each body joint's q is within its limits (robot/joints.py), allowing {limits.JOINT_PAST_LIMIT_WARN} rad "
-    f"for noise; fail past {limits.JOINT_PAST_LIMIT_FAIL} rad.",
-    check_limits, hold_s=1.0, clear_s=1.0,
+    f"Each body joint stays inside its limits (robot/joints.py): warn when within {limits.JOINT_AT_LIMIT} rad "
+    f"of a limit (at it), fail when more than {limits.JOINT_PAST_LIMIT} rad past it (forced beyond).",
+    check_limits, hold_s=0.25, clear_s=1.0,  # one poll: a joint at or past its stop should show at once
 )
 JOINT_FROZEN = Rule(
     "joint_frozen", "Joint readings change",

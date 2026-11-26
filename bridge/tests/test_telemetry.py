@@ -212,3 +212,17 @@ def test_recordings_are_gzip_json_lines(outputs):
     with gzip.open(path, "rt") as f:
         header = json.loads(f.readline())
     assert header["recording"] == 1 and header["interface"] == "test0"
+
+
+def test_loop_keeps_its_rhythm_when_consumers_are_slow():
+    import time
+
+    class Slow:  # like a dashboard redraw on the Thor
+        def add(self, messages, now):
+            time.sleep(0.1)
+
+    source = FakeSource(duration=60.0)
+    started = time.monotonic()
+    run(source, [Slow()], duration=1.5, poll_secs=0.25)  # 6 polls
+    elapsed = time.monotonic() - started
+    assert elapsed == pytest.approx(1.5, abs=0.15)  # not 6 x (0.25 + 0.1) = 2.1 s

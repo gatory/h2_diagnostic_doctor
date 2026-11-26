@@ -22,11 +22,14 @@ STALE_MIN_S = 0.5
 
 # ---------------------------------------------------------------- Body joints (rules/joints.py)
 
-# How far past a joint limit (robot/joints.py) q may be before it counts (rad).
-# MVP: 0.02 allows for encoder noise and rounded limits; measured: head_pitch rests
-# 0.003 past its limit on a healthy robot. Fail: chosen, clearly beyond the noise (~6°).
-JOINT_PAST_LIMIT_WARN = 0.02
-JOINT_PAST_LIMIT_FAIL = 0.10
+# A body joint (robot/joints.py) is AT its limit (warn) once q is within this
+# distance of it (rad), and PAST it (fail, being forced beyond) once q is further
+# past it than this. Both 0.02 (~1.1°): the MVP's allowance for encoder noise and
+# rounded limits. measured on the healthy robot: the closest any joint came to a
+# limit at rest was 0.054 inside (L_wrist_roll); head_pitch rests 0.003 past its
+# limit (on its stop), so it reads as AT the limit whenever the head is fully down.
+JOINT_AT_LIMIT = 0.02
+JOINT_PAST_LIMIT = 0.02
 
 # A body joint whose q is bit-identical for this long while messages keep coming
 # is a stuck reading (warn). measured: at most 1.14 s on a healthy robot at rest.

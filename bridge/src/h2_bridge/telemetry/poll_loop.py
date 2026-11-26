@@ -27,8 +27,11 @@ def run(source, consumers, duration=None, poll_secs=POLL_SECS):
 
     `duration` is measured on the source's clock (source.now()), not the wall
     clock: the same thing for a live source, and "the first N seconds of the
-    recording" for a replay. `poll_secs` is the wall-clock sleep between polls
-    (0 for a replay that steps its own clock). Returns True if stopped by Ctrl-C.
+    recording" for a replay. `poll_secs` is the wall-clock time from one poll to
+    the next (0 for a replay that steps its own clock): the loop sleeps only for
+    what's left of it after the consumers' work, so a slow redraw doesn't stretch
+    every poll (and with it every warning's delay). If the work takes longer, the
+    next poll starts at once. Returns True if stopped by Ctrl-C.
     """
     stop = False
 
@@ -41,10 +44,12 @@ def run(source, consumers, duration=None, poll_secs=POLL_SECS):
     source.start()  # no-op if already started; makes now() meaningful for the deadline
     end = None if duration is None else source.now() + duration
     previous = signal.signal(signal.SIGINT, on_ctrl_c)
+    next_poll = time.monotonic() + poll_secs
     try:
         while not stop and not source.done:
             if poll_secs:
-                time.sleep(poll_secs)
+                time.sleep(max(0.0, next_poll - time.monotonic()))
+                next_poll = max(next_poll + poll_secs, time.monotonic())  # never bank up missed polls
             messages = source.poll()
             now = source.now()
             for consumer in consumers:
