@@ -49,3 +49,14 @@ Sources: Unitree's Dex5-1 / Dex5-1P spec sheet (unitree.com) and the MVP's test 
 `<finger>` is `index`, `middle`, `ring`, `pinky` (the spec's "little finger"). `knuckle_swing` and `knuckle_bend` may be swapped until tested: spread the fingers while recording and see which slot moves.
 
 **Useful for diagnostics:** a coupled pair whose ratio drifts far from ~0.86 hints at a slipping or broken linkage (`HAND_COUPLED`, `HAND_COUPLING_RATIO`).
+
+## Healthy-robot baselines for checkup (2026-11-26)
+
+From the three 60 s recordings of 2026-11-26 (`outputs/telemetry/2026-11-26/`, robot standing, nothing moving on purpose). These set checkup's limits (`bridge/src/h2_bridge/checkup/limits.py`).
+
+- **`head_pitch` rests past its limit.** It sat at q = 0.8411 for a whole recording; the limit is 0.8377 (`robot/joints.py`), so 0.003 rad past. Probably the head lying on its hard stop, with a limit that's slightly off or rounded. Checkup only counts a joint as past its limit when it's more than 0.02 rad past (the MVP's allowance for encoder noise and rounded limits).
+- **Body joints never hold a bit-identical `q` for long.** At rest, the longest run of an unchanged `q` was 1.14 s (R_hip_roll); encoder noise changes the value. So a joint whose `q` doesn't change for 5 s is a real sign of a stuck reading.
+- **The right hand's `thumb_base_swing` `q` never changes.** It was bit-identical for 42-60 s in all three recordings, while every other hand slot (the left thumb included) changed within 0.11 s. *Open:* is that slot stuck, or does that joint just not report noise? Checkup's hand frozen rule leaves out only that slot (`HAND_FROZEN_IGNORE` in `checkup/limits.py`) until that's known; without the exception it warns on it in every recording.
+- **The two body IMUs agree in roll and pitch, not yaw.** pelvis - torso in roll and pitch equals minus the waist joints' roll and pitch (`waist_roll`, `waist_pitch`) to within 0.04 rad. Yaw differs by up to 0.48 rad while the waist yaw moves less than 0.08 rad: each IMU's yaw drifts on its own (no absolute heading), so yaw can't be compared.
+- **The hand IMUs' `temperature` reads 6489-6509** (the body IMUs: 78-81). *Open:* a different unit or scale; 6500 as centi-degrees would be 65.00 °C, close to the finger motors' 39-62 °C. Not used by checkup until confirmed.
+- **Battery cell spread** (max - min of the 18 cells): 11-30 mV. **`motorstate`** was 0 on every body and hand motor, and the hands' **`error`** was always `[0, 0]`. No NaN values anywhere.

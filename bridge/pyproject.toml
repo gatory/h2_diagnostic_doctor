@@ -22,3 +22,11 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 unitree-sdk2py = { path = "../../unitree_sdk2_python", editable = false }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
