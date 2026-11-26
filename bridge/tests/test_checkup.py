@@ -158,6 +158,34 @@ def test_motor_error_bits_warn():
     assert results["motor_errors"].bad[0][0] == "right:middle_knuckle_bend"
 
 
+def test_motor_error_bits_are_named_from_the_docs():
+    def overheat(topic, t, data):
+        if topic == "rt/lf/lowstate":
+            data["motor_state"][18]["motorstate"] = 0x204  # Sustained Overvoltage + Winding Overheating
+    _, results = check(tweak=overheat)
+    subject, obs, *_ = results["motor_errors"].bad[0]
+    assert subject == "L_elbow"
+    assert obs.message == "motorstate 0x204: Sustained Overvoltage, Winding Overheating"
+
+
+def test_ab_mode_skips_the_ankle_and_waist_angles():
+    """In AB mode (mode_pr 1) the ankles' and waist's q is a raw motor position: no limit or IMU check on them."""
+    def ab_mode(topic, t, data):
+        if topic == "rt/lf/lowstate":
+            data["mode_pr"] = 1
+            data["motor_state"][4]["q"] = 5.0 + 0.001 * ((t - START) * 20 % 3)   # L_ankle_roll: far outside its "limits"
+            data["motor_state"][13]["q"] = 2.0 + 0.001 * ((t - START) * 20 % 3)  # waist_roll: would break the IMU check
+    _, results = check(tweak=ab_mode)
+    assert bad_rules(results) == {}
+    assert results["imu_agreement"].status == Status.NO_DATA
+
+    def ab_mode_elbow_past(topic, t, data):  # ... but every other joint is still checked
+        ab_mode(topic, t, data)
+        if topic == "rt/lf/lowstate":
+            data["motor_state"][18]["q"] = 3.2 + 0.001 * ((t - START) * 20 % 3)
+    assert bad_rules(check(tweak=ab_mode_elbow_past)[1]) == {"joint_limits": Status.FAIL}
+
+
 def test_hand_error_warns():
     def hand_error(topic, t, data):
         if topic == "rt/dex5/left/state":

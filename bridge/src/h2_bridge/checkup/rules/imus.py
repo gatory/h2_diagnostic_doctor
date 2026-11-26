@@ -3,6 +3,7 @@
 from h2_bridge.checkup import limits
 from h2_bridge.checkup.models import Observation, Rule, Status
 from h2_bridge.checkup.rules.bands import band
+from h2_bridge.robot.joints import MODE_PR
 
 # Body slots of the waist joints (robot/joints.py) and rpy indices they turn.
 _WAIST = {"roll": (13, 0), "pitch": (14, 1)}  # axis -> (body slot, rpy index)
@@ -12,8 +13,10 @@ def check_imu_agreement(snap, memory):
     """pelvis - torso, in roll and pitch, should equal minus the waist joints; fail/warn on the leftover.
 
     Yaw isn't checked: each IMU's yaw drifts on its own (docs/robot_findings.md).
+    In AB mode (mode_pr 1) the waist's q is a raw motor position, not an angle,
+    so there's nothing to compare against: no data.
     """
-    if not (snap.body and snap.torso_imu):
+    if not (snap.body and snap.torso_imu) or snap.body.mode_pr != MODE_PR:
         return None
     pelvis, torso = snap.body.imu.rpy, snap.torso_imu.rpy
     observations = []

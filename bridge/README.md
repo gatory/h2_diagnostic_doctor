@@ -110,7 +110,7 @@ The core topics are recorded. The file is flushed about 4 times a second, so a c
 |---|---|
 | Topics | per topic: Hz over the last 2 s / expected, colored by checkup's verdict (green: on rate, yellow: slow, red: silent or stale), Avg since the start, Last (age of the newest message), Dropped (live only) |
 | Warnings | checkup's current findings, worst first (at most 10, then "and N more"); "none" when every rule passes |
-| Body joints | the 31 joints by name (`robot/joints.py`): q, dq, tau, both temperatures, mode/motorstate; `mode_machine`, `mode_pr`, `tick` in the title |
+| Body joints | the 31 joints by name (`robot/joints.py`): q, dq, tau, temperature (surface/winding), mode and error bits (`m/err`, hex when set); in the title: `mode_pr` (PR, or AB with `*` on the ankle/waist joints whose q is then a raw motor position), the model and the uptime from `tick`. Meanings from Unitree's H2 SDK docs (`docs/robot_findings.md`) |
 | Hands | one row per finger joint, left hand (orange) then right (blue): q, dq, tau, temperature (none for the position-only thumb), mode/motorstate; per hand: error, power, and the highest reading of each of the 16 pressure pads |
 | IMUs | pelvis (inside `rt/lf/lowstate`), torso (`rt/lf/secondary_imu`) and both hands: rpy, gyro, accel, temperature |
 | Battery | charge, health, voltage, current, cell min-max and spread, temperatures, cycles, raw state |
@@ -140,10 +140,10 @@ It listens to the core topics (or replays a recording), runs every rule on each 
 | Topics arriving | each topic: not silent 3 s after the start, not stale (no message for 5 periods, at least 0.5 s), not below 80% of its expected rate | fail / fail / warn |
 | No dropped messages | the live source kept up (no data for a replay) | warn |
 | No NaN joint readings | q, dq, tau of every body and hand motor are real numbers | fail |
-| Joints within limits | body q **at** a limit in `robot/joints.py` (within 0.02 rad of it): warn; **forced past** it (more than 0.02 rad beyond): fail. Shows within one poll. `head_pitch` rests on its stop, so it warns whenever the head is fully down. Hands: not checked, their zero is unconfirmed | warn / fail |
+| Joints within limits | (in AB mode, `mode_pr` 1, the ankles and waist are skipped: their q is a raw motor position) body q **at** a limit in `robot/joints.py` (within 0.02 rad of it): warn; **forced past** it (more than 0.02 rad beyond): fail. Shows within one poll. `head_pitch` rests on its stop, so it warns whenever the head is fully down. Hands: not checked, their zero is unconfirmed | warn / fail |
 | Joint readings change | no body q bit-identical for 5 s while messages arrive | warn |
 | Hand readings change | no hand motor q bit-identical for 5 s while that hand's messages arrive, except at an end of its range (within 0.05 rad), where the reading is clamped (a curled finger, the right thumb on its stop) | warn |
-| No motor error bits | `motorstate` is 0 on every motor (what each bit means is unknown) | warn |
+| No motor error bits | `motorstate` is 0 on every motor; a set bit is named from Unitree's error-code table (`robot/motors.py`), e.g. "0x200: Winding Overheating" | warn |
 | No hand errors | each hand's `error` is all 0 | warn |
 | Battery cells balanced | cell spread under 50 mV (warn), 100 mV (fail) | warn / fail |
 | Battery charged | charge above 20% (warn), 10% (fail) | warn / fail |

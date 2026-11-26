@@ -226,3 +226,10 @@ def test_loop_keeps_its_rhythm_when_consumers_are_slow():
     run(source, [Slow()], duration=1.5, poll_secs=0.25)  # 6 polls
     elapsed = time.monotonic() - started
     assert elapsed == pytest.approx(1.5, abs=0.15)  # not 6 x (0.25 + 0.1) = 2.1 s
+
+
+def test_motor_error_codes_decode():
+    from h2_bridge.robot.motors import decode_motorstate
+    assert decode_motorstate(0) == []
+    assert decode_motorstate(0x80000001) == ["Overcurrent", "Disconnection timeout (PC side)"]
+    assert decode_motorstate(0x100000) == ["unknown bits 0x100000"]

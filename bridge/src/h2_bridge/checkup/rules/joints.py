@@ -3,6 +3,8 @@
 from h2_bridge.checkup import limits
 from h2_bridge.checkup.models import Observation, Rule, Status
 from h2_bridge.checkup.rules.bands import band
+from h2_bridge.robot.joints import MODE_PR, PR_LINKAGE_JOINTS
+from h2_bridge.robot.motors import decode_motorstate
 from h2_bridge.telemetry.snapshot import HANDS
 
 
@@ -29,14 +31,19 @@ def check_limits(snap, memory):
     """Per body joint: warn when q is at a limit (robot/joints.py), fail when it's forced past it.
 
     past = how far q is beyond its nearest limit (negative: inside). Hands aren't
-    checked: whether their q uses the spec's zero is unconfirmed.
+    checked: whether their q uses the spec's zero is unconfirmed. In AB mode
+    (mode_pr 1) the ankles' and waist's q is a raw motor position, not an angle,
+    so those slots are skipped (robot/joints.py: PR_LINKAGE_JOINTS).
     """
     if not snap.body:
         return None
+    angles_only = snap.body.mode_pr != MODE_PR
     observations = []
     for j in snap.body.joints:
         if j.q is None:
             continue  # check_nan reports it
+        if angles_only and j.slot in PR_LINKAGE_JOINTS:
+            continue  # not an angle in AB mode
         past = max(j.q - j.upper, j.lower - j.q)  # > 0: past a limit; < 0: inside
         side = "upper" if j.q - j.upper > j.lower - j.q else "lower"
         limit = j.upper if side == "upper" else j.lower
@@ -124,11 +131,15 @@ def _unchanged(memory, marker, readings, now, window):
 
 
 def check_motor_errors(snap, memory):
-    """Per motor: warn if motorstate (error bits) isn't 0. Which bit means what is unknown, so warn, not fail."""
+    """Per motor: warn if motorstate (error bits) isn't 0, naming the bits (robot/motors.py, from Unitree's docs)."""
     observations = []
     for subject, m in _motors(snap):
-        observations.append(Observation(subject, Status.WARN, f"motorstate 0x{m.motorstate:X}", m.motorstate, 0)
-                            if m.motorstate else Observation(subject, Status.PASS))
+        if m.motorstate:
+            names = ", ".join(decode_motorstate(m.motorstate))
+            observations.append(Observation(subject, Status.WARN, f"motorstate 0x{m.motorstate:X}: {names}",
+                                            m.motorstate, 0))
+        else:
+            observations.append(Observation(subject, Status.PASS))
     return observations or None
 
 
