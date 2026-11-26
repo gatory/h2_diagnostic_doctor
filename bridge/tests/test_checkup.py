@@ -115,12 +115,14 @@ def test_a_stopped_hand_topic_is_not_reported_as_frozen_motors():
     assert results["topic_flow"].status == Status.FAIL
 
 
-def test_the_left_out_thumb_slot_may_stay_frozen():
-    assert "right:thumb_base_swing" in limits.HAND_FROZEN_IGNORE
-    def freeze_thumb(topic, t, data):
+def test_a_hand_motor_resting_on_its_stop_is_not_frozen():
+    def at_stops(topic, t, data):  # values read off the real robot (limit_test, 2026-11-26)
         if topic == "rt/dex5/right/state":
-            data["motor_state"][16]["q"] = -0.59  # right thumb_base_swing, as on the real robot
-    assert bad_rules(check(seconds=10.0, tweak=freeze_thumb)[1]) == {}
+            data["motor_state"][16]["q"] = -0.58676  # right thumb_base_swing on its stop
+        if topic == "rt/dex5/left/state":
+            data["motor_state"][2]["q"] = 1.69269  # left index_mid_bend fully curled
+            data["motor_state"][3]["q"] = 1.39608  # left index_tip_bend fully curled
+    assert bad_rules(check(seconds=10.0, tweak=at_stops)[1]) == {}
 
 
 def test_joint_at_its_limit_warns_and_forced_past_it_fails():
@@ -205,6 +207,47 @@ def test_dropped_messages_warn_on_a_live_source():
     dropped["rt/dex5/left/state"] = 12
     _, results = check(dropped=dropped)
     assert bad_rules(results) == {"dropped": Status.WARN}
+
+
+# ---------------------------------------------------------------- Flagging fast, without flicker
+
+
+def test_faults_are_flagged_on_the_first_poll_after_they_start():
+    """No waiting: a fault starting at 3.0 s counts from the poll that first sees it (polls every 0.25 s)."""
+    cases = {
+        "joint_limits": lambda topic, t, data: data["motor_state"][18].update(q=3.0717795 + 0.05 + 0.001 * ((t - START) * 20 % 3))
+        if topic == "rt/lf/lowstate" and after(3)(t) else None,
+        "cell_spread": lambda topic, t, data: data["cell_vol"].__setitem__(0, data["cell_vol"][0] - 60)
+        if topic == "rt/lf/bmsstate" and after(3)(t) else None,
+        "motor_errors": lambda topic, t, data: data["motor_state"][0].update(motorstate=1)
+        if topic == "rt/lf/lowstate" and after(3)(t) else None,
+    }
+    for rule, tweak in cases.items():
+        _, results = check(tweak=tweak)
+        _, _, first, _ = results[rule].bad[0]
+        assert 3.0 <= first - START <= 3.25, rule
+
+
+def test_band_flags_at_once_and_clears_only_past_its_margin():
+    from h2_bridge.checkup.rules.bands import band
+    memory, grade = {}, lambda v: band(memory, "x", v, warn=50, fail=100, margin=10).value
+    assert [grade(v) for v in (49, 50, 45, 41, 39)] == ["pass", "warn", "warn", "warn", "pass"]
+    assert [grade(v) for v in (100, 95, 89, 39)] == ["fail", "fail", "warn", "pass"]
+
+
+def test_band_works_when_lower_is_worse():
+    from h2_bridge.checkup.rules.bands import band
+    memory, grade = {}, lambda v: band(memory, "soc", v, warn=20, fail=10, margin=2, higher_is_bad=False).value
+    assert [grade(v) for v in (21, 20, 21, 22, 23, 10, 11, 13)] == ["pass", "warn", "warn", "warn", "pass", "fail", "fail", "warn"]
+
+
+def test_a_value_hovering_at_its_threshold_is_one_steady_warning():
+    def hover(topic, t, data):  # the spread alternates 49 / 52 mV every message
+        if topic == "rt/lf/bmsstate":
+            data["cell_vol"][0] -= 47 if round((t - START) * 20) % 2 else 50
+    checkup, results = check(tweak=hover)
+    assert results["cell_spread"].status == Status.WARN
+    assert len(checkup.findings()) == 1  # still on at the end: never flickered off
 
 
 # ---------------------------------------------------------------- Debouncing

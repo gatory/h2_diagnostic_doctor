@@ -142,14 +142,14 @@ It listens to the core topics (or replays a recording), runs every rule on each 
 | No NaN joint readings | q, dq, tau of every body and hand motor are real numbers | fail |
 | Joints within limits | body q **at** a limit in `robot/joints.py` (within 0.02 rad of it): warn; **forced past** it (more than 0.02 rad beyond): fail. Shows within one poll. `head_pitch` rests on its stop, so it warns whenever the head is fully down. Hands: not checked, their zero is unconfirmed | warn / fail |
 | Joint readings change | no body q bit-identical for 5 s while messages arrive | warn |
-| Hand readings change | no hand motor q bit-identical for 5 s while that hand's messages arrive. The right `thumb_base_swing` is left out (`HAND_FROZEN_IGNORE`): it never changes on a healthy hand, an open question | warn |
+| Hand readings change | no hand motor q bit-identical for 5 s while that hand's messages arrive, except at an end of its range (within 0.05 rad), where the reading is clamped (a curled finger, the right thumb on its stop) | warn |
 | No motor error bits | `motorstate` is 0 on every motor (what each bit means is unknown) | warn |
 | No hand errors | each hand's `error` is all 0 | warn |
 | Battery cells balanced | cell spread under 50 mV (warn), 100 mV (fail) | warn / fail |
 | Battery charged | charge above 20% (warn), 10% (fail) | warn / fail |
 | Body IMUs agree | pelvis - torso in roll and pitch matches the waist joints within 0.15 rad (warn), 0.30 (fail). Yaw drifts, so it isn't compared | warn / fail |
 
-Every limit, and where its number came from, is in `src/h2_bridge/checkup/limits.py`; the healthy-robot measurements behind them are in `docs/robot_findings.md`. Temperatures and fields of unknown meaning (`fan_state`, `bmsstate`, `mode`, the hand IMU temperature) are never judged. **Debouncing:** a problem only counts once it has held for a moment (0.5-2 s depending on the rule; NaN counts at once), and only clears once it has been gone for a moment, so a value hovering at a limit doesn't flicker.
+Every limit, and where its number came from, is in `src/h2_bridge/checkup/limits.py`; the healthy-robot measurements behind them are in `docs/robot_findings.md`. Temperatures and fields of unknown meaning (`fan_state`, `bmsstate`, `mode`, the hand IMU temperature) are never judged. **Timing:** problems are flagged **at once**, on the first poll that sees them (like the MVP). A value that can hover at a threshold (joint limits, cell spread, charge, the IMU leftover) has **hysteresis** instead: once on, it stays on until the value is a margin back on the good side (`*_MARGIN` in `limits.py`, `checkup/rules/bands.py`), so it doesn't flicker. Only `imu_agreement` still waits 1 s, because the two IMUs' messages are a few ms apart and one snapshot can disagree during fast motion.
 
 ### Saved files
 

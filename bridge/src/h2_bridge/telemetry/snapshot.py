@@ -95,6 +95,8 @@ class HandMotor:
     temperature: int | None  # None for the position-only thumb slots
     mode: int
     motorstate: int
+    lower: float  # rad, the spec range (robot/joints.py); full curl reads within ~0.035 of it
+    upper: float
 
 
 @dataclass(frozen=True)
@@ -253,10 +255,11 @@ def read_body(lowstate):
 def read_hand(hand, side):
     """A HandState_ dict -> Hand: the 20 motor slots by name, and each pressure pad's highest reading."""
     motors = []
-    for slot, (name, _, _, position_only) in enumerate(joints.HAND_JOINTS):
+    for slot, (name, lower, upper, position_only) in enumerate(joints.HAND_JOINTS):
         m = hand["motor_state"][slot]
         temperature = None if position_only else m["temperature"][0]
-        motors.append(HandMotor(slot, name, m["q"], m["dq"], m["tau_est"], temperature, m["mode"], m["motorstate"]))
+        motors.append(HandMotor(slot, name, m["q"], m["dq"], m["tau_est"], temperature, m["mode"], m["motorstate"],
+                                lower, upper))
     pad_max = tuple(max(pad["pressure"]) for pad in hand["press_sensor_state"])
     return Hand(side, tuple(motors), pad_max, tuple(hand["error"]), hand["power_v"], hand["power_a"],
                 hand["system_v"], read_imu(hand["imu_state"]))
