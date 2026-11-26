@@ -12,8 +12,8 @@ import time
 from collections import deque
 
 from h2_bridge.telemetry.models import Message
-from h2_bridge.telemetry.sources.base import Source, TopicError
-from h2_bridge.utils.convert import msg_to_dict
+from h2_bridge.telemetry.sources.base_source import Source, TopicError
+from h2_bridge.utils.msg_to_dict import msg_to_dict
 
 # Inbox cap (~30 s of core topics) so a stalled poll() can't use unbounded memory
 MAX_PENDING = 10_000
@@ -52,7 +52,7 @@ class LiveSource(Source):
         """Start DDS and subscribe to every topic. Raises DDSError or TopicError; nothing is left subscribed on failure."""
         from unitree_sdk2py.core.channel import ChannelSubscriber
 
-        from h2_bridge.dds import init_dds
+        from h2_bridge.dds_setup import init_dds
 
         if self._subscribers:
             return self

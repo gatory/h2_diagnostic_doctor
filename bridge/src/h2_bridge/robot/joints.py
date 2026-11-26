@@ -1,37 +1,14 @@
-"""The one place storing robot facts.
+"""Joint facts: which motor_state slot is which joint, and its limits.
 
-    CORE_TOPICS    the topics telemetry subscribes to (SDK class, expected Hz)
-    BODY_JOINTS    LowState_.motor_state slot -> joint name and limits
-    HAND_JOINTS    HandState_.motor_state slot -> finger joint and limits
-    HAND_*         hand spec: coupling, electrical, temperature, pressure pads
-    NUM_*          how many slots of each array carry data
+    BODY_JOINTS       LowState_.motor_state slot -> (name, min rad, max rad)
+    NUM_BODY_JOINTS   how many body slots carry data (31 of 35)
+    HAND_JOINTS       HandState_.motor_state slot -> (name, min rad, max rad, position only?)
 
+Plain data, no imports from telemetry: telemetry, checkup and server all read it.
 Details and sources: docs/robot_findings.md.
 """
 
 from math import radians
-
-from unitree_sdk2py.idl.unitree_hg.msg.dds_ import (
-    BmsState_,
-    HandState_,
-    IMUState_,
-    LowState_,
-    MainBoardState_,
-)
-
-from h2_bridge.telemetry.models import TopicSpec
-
-# ---------------------------------------------------------------- Topics
-# Note uses low frequency copy for better computation optimization
-_CORE = [
-    TopicSpec("rt/lf/lowstate", LowState_, 20.0),  # body: 31 joints, pelvis IMU
-    TopicSpec("rt/lf/secondary_imu", IMUState_, 20.0),  # torso IMU (above the waist)
-    TopicSpec("rt/lf/bmsstate", BmsState_, 20.0),  # battery
-    TopicSpec("rt/lf/mainboardstate", MainBoardState_, 20.0),  # main board temperatures, fans
-    TopicSpec("rt/dex5/left/state", HandState_, 100.0),  # left hand: motors, pressure pads
-    TopicSpec("rt/dex5/right/state", HandState_, 100.0),  # right hand: motors, pressure pads
-]
-CORE_TOPICS = {spec.name: spec for spec in _CORE}  # name -> TopicSpec
 
 # ---------------------------------------------------------------- Body (rt/lf/lowstate)
 # Row i is LowState_.motor_state[i]. LowState_ has 35 slots; only 0..30 are used.
@@ -109,16 +86,3 @@ HAND_JOINTS = [
     ("thumb_mid_bend",        radians(0),       radians(110),    True),           # 18
     ("thumb_tip_bend",        radians(0),       radians(92),     True),           # 19
 ]
-
-# ---------------------------------------------------------------- Battery (rt/lf/bmsstate)
-# cell_vol[0..17] are the 18 cells in mV (they sum to bmsvoltage[0]); [18..39] unused.
-NUM_BMS_CELLS = 18
-
-# ---------------------------------------------------------------- Main board (rt/lf/mainboardstate)
-# temperature[0..3] are °C (probably); which board parts they are is unknown. [4..5] unused.
-NUM_MAINBOARD_TEMPS = 4
-
-# ---------------------------------------------------------------- IMUs
-# Two IMUs (T1): the main one in the PELVIS rides inside LowState_.imu_state
-# (rt/lf/lowstate); the second, in the TORSO above the waist, is rt/lf/secondary_imu.
-# Their difference is the waist's rotation.

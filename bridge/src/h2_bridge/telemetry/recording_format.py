@@ -10,7 +10,7 @@ order, then a footer when the recording closes.
 
 No footer means the recorder died (power loss, kill -9). Plain .jsonl files
 (made before gzip) are still read. Files live in
-outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl.gz (via utils/outputs.py).
+outputs/telemetry/<date>/<name>_<time>_<interface>.jsonl.gz (via utils/output_paths.py).
 """
 
 import gzip
@@ -20,7 +20,7 @@ import time
 from datetime import datetime
 
 from h2_bridge.telemetry.models import Message, TopicSpec
-from h2_bridge.utils.sdk_types import lookup_type
+from h2_bridge.utils.sdk_type_lookup import lookup_type
 
 FORMAT_VERSION = 1
 
@@ -47,7 +47,7 @@ class RecordingWriter:
     """
 
     def __init__(self, source, name="recording"):
-        from h2_bridge.utils.outputs import output_path
+        from h2_bridge.utils.output_paths import output_path
 
         started = datetime.now().astimezone()
         self.path = output_path("telemetry", name, source.interface, when=started, ext="jsonl.gz")

@@ -24,7 +24,7 @@ PC1 = `unitree-h2` (192.168.123.161), PC2 = `unitree-H2-pc2` (192.168.123.162).
 
 ## Dex5 hand: the spec sheet matches the recorded data (2026-11-24)
 
-Sources: Unitree's Dex5-1 / Dex5-1P spec sheet (unitree.com) and the MVP's test T2 (curling each finger, `../h2_diagnostics/docs/field_map.md`). Encoded in `bridge/src/h2_bridge/telemetry/layout.py` (`HAND_*`).
+Sources: Unitree's Dex5-1 / Dex5-1P spec sheet (unitree.com) and the MVP's test T2 (curling each finger, `../h2_diagnostics/docs/field_map.md`). Encoded in `bridge/src/h2_bridge/robot/joints.py` (`HAND_JOINTS`).
 
 - **Each finger has 4 slots but 3 degrees of freedom.** The spec lists 4 joints per finger ("Knuckles 0-3") and says knuckle 3 is *coupled* to knuckle 2. T2 saw a finger's 3rd and 4th slots move most when curling, ~1.6 and ~1.4 rad, at a steady ratio of ~0.86. The spec's ranges, 95° (1.66 rad) and 81° (1.41 rad), give 0.85. So slots 2 and 3 of each finger are knuckles 2 and 3, and slot 3 follows slot 2.
 - **Still open:** which of slots 0 and 1 is the sideways swing (±22°) and which is the base bend (0-90°). Also whether `q` uses the spec's zero, so the limits can't drive warnings yet.
@@ -36,7 +36,7 @@ Sources: Unitree's Dex5-1 / Dex5-1P spec sheet (unitree.com) and the MVP's test 
 - **Temperature:** the spec's -20-60 °C is the *ambient* range. Finger motors already read 42-66 °C at rest (MVP), and Unitree publishes no motor limit.
 - **Mechanical (spec):** 1100 g; 217.3 x 127.5 x 72.1 mm flat; fingertip force 10 N; repeatability ±1 mm; smallest grip 10 mm; holds 3.5 kg palm down, 4.5 kg palm sideways (5 cm hard ball).
 
-### Joint names in `layout.py`
+### Joint names in `robot/joints.py`
 
 | Spec name | Ours | Motion |
 |---|---|---|

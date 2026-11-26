@@ -11,10 +11,10 @@ Each name is looked up in order, stopping at the first that knows it:
 import difflib
 
 from h2_bridge.discovery.topic_cache import load_topic_cache
-from h2_bridge.telemetry.layout import CORE_TOPICS
+from h2_bridge.telemetry.core_topics import CORE_TOPICS
 from h2_bridge.telemetry.models import TopicSpec
-from h2_bridge.telemetry.sources.base import TopicError
-from h2_bridge.utils.sdk_types import lookup_type
+from h2_bridge.telemetry.sources.base_source import TopicError
+from h2_bridge.utils.sdk_type_lookup import lookup_type
 
 # How long to listen for a topic's writers when neither CORE_TOPICS nor the cache knows it.
 DISCOVERY_SECS = 2.0
@@ -53,7 +53,7 @@ def _from_cache(name, cache):
 
 def _discover(names, interface, domain_id, secs):
     """{name: TopicSpec} for `names`, from one discovery run (which also updates the cache)."""
-    from h2_bridge.discovery.analysis import group_by_topic
+    from h2_bridge.discovery.snapshot_views import group_by_topic
     from h2_bridge.discovery.collect import collect_snapshot
     from h2_bridge.discovery.topic_cache import update_topic_cache
 

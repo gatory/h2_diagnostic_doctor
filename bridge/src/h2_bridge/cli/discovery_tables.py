@@ -1,7 +1,7 @@
 """Rich tables for the `h2-doctor discovery ...` commands.
 
 Presentation only: each function takes discovery data and returns a
-rich Table; printing is up to the caller (cli/discovery.py). One table
+rich Table; printing is up to the caller (cli/discovery_commands.py). One table
 per kind of row:
 
     topics_table(topics)                      one row per topic (the summary)
@@ -50,7 +50,7 @@ def _add_owner_columns(table):
 
 def _owner_cells(participant, participant_key):
     """Cell values for the owner columns. `participant` may be None if it wasn't seen."""
-    from h2_bridge.discovery.analysis import get_participant_ips
+    from h2_bridge.discovery.snapshot_views import get_participant_ips
 
     if participant is None:
         return [participant_key[:13], "?", "?", "?", "?"]
@@ -85,7 +85,7 @@ def participants_table(snapshot):
     """
     from rich.table import Table
 
-    from h2_bridge.discovery.analysis import group_endpoints_by_participant
+    from h2_bridge.discovery.snapshot_views import group_endpoints_by_participant
 
     owned = group_endpoints_by_participant(snapshot)
 

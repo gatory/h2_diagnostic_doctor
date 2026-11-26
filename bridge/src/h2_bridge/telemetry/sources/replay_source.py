@@ -13,11 +13,11 @@ import json
 import time
 import zlib
 
-from h2_bridge.telemetry.recording import open_recording, read_header, read_line
+from h2_bridge.telemetry.recording_format import open_recording, read_header, read_line
 
 # What reading a gzip file that was cut off (recorder killed mid-write) raises.
 _CUT_OFF = (EOFError, zlib.error, gzip.BadGzipFile)
-from h2_bridge.telemetry.sources.base import Source, TopicError
+from h2_bridge.telemetry.sources.base_source import Source, TopicError
 
 
 class ReplaySource(Source):

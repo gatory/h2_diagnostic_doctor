@@ -128,12 +128,12 @@ def _cmd_watch(args):
 
     from rich.console import Console
 
-    from h2_bridge.dds import DDSError
-    from h2_bridge.telemetry.layout import CORE_TOPICS
-    from h2_bridge.telemetry.recording import RecordingWriter
-    from h2_bridge.telemetry.resolve import resolve_topics
-    from h2_bridge.telemetry.sources.base import TopicError
-    from h2_bridge.telemetry.sources.live import LiveSource
+    from h2_bridge.dds_setup import DDSError
+    from h2_bridge.telemetry.core_topics import CORE_TOPICS
+    from h2_bridge.telemetry.recording_format import RecordingWriter
+    from h2_bridge.telemetry.topic_lookup import resolve_topics
+    from h2_bridge.telemetry.sources.base_source import TopicError
+    from h2_bridge.telemetry.sources.live_source import LiveSource
 
     err = Console(stderr=True)
     try:
@@ -169,8 +169,8 @@ def _cmd_replay(args):
     """
     from rich.console import Console
 
-    from h2_bridge.telemetry.sources.base import TopicError
-    from h2_bridge.telemetry.sources.replay import ReplaySource
+    from h2_bridge.telemetry.sources.base_source import TopicError
+    from h2_bridge.telemetry.sources.replay_source import ReplaySource
 
     err = Console(stderr=True)
     try:
@@ -210,7 +210,7 @@ def _play(source, recorder, duration, show_table):
     from rich.live import Live
 
     from h2_bridge.cli import telemetry_tables
-    from h2_bridge.telemetry.stream import RateMeter, latest
+    from h2_bridge.telemetry.rate_meter import RateMeter, latest
 
     counts = dict.fromkeys(source.topics, 0)
     meter = RateMeter()
@@ -282,7 +282,7 @@ def _print_summary(err, counts, dropped, recorder):
 
 def _record_name(value):
     """argparse type for --record: check the name before anything starts."""
-    from h2_bridge.utils.outputs import check_name
+    from h2_bridge.utils.output_paths import check_name
 
     try:
         return check_name(value)

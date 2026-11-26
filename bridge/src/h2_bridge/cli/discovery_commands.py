@@ -113,9 +113,9 @@ def _cmd_topics(args):
     """Handler for `h2-doctor discovery topics`: collect a snapshot, print the per-topic summary, maybe save it."""
     from rich.console import Console
 
-    from h2_bridge.discovery.analysis import group_by_topic
+    from h2_bridge.discovery.snapshot_views import group_by_topic
     from h2_bridge.discovery.collect import collect_snapshot
-    from h2_bridge.discovery.persistence import save_snapshot
+    from h2_bridge.discovery.snapshot_files import save_snapshot
     from h2_bridge.discovery.topic_cache import load_topic_cache, update_topic_cache
 
     out = Console()  # stdout: the data itself
@@ -151,9 +151,9 @@ def _cmd_show(args):
     """
     from rich.console import Console
 
-    from h2_bridge.discovery.analysis import group_by_topic
-    from h2_bridge.discovery.persistence import load_snapshot
-    from h2_bridge.utils.outputs import find_outputs
+    from h2_bridge.discovery.snapshot_views import group_by_topic
+    from h2_bridge.discovery.snapshot_files import load_snapshot
+    from h2_bridge.utils.output_paths import find_outputs
 
     out = Console()
     err = Console(stderr=True)
@@ -214,7 +214,7 @@ def _save_name(value):
     """argparse type for --save: check the name before any discovery runs."""
     import argparse
 
-    from h2_bridge.utils.outputs import check_name
+    from h2_bridge.utils.output_paths import check_name
 
     try:
         return check_name(value)

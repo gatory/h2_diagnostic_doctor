@@ -1,7 +1,7 @@
 """Rich tables for the `h2-doctor telemetry ...` commands.
 
 Presentation only: each function takes telemetry data and returns a rich
-Table; printing (or redrawing it live) is up to the caller (cli/telemetry.py).
+Table; printing (or redrawing it live) is up to the caller (cli/telemetry_commands.py).
 
     watch_table(topics, newest, meter, dropped, now)                 one row per topic, redrawn live
     topic_view(name, spec, message, meter, dropped, now)             every value of one topic, redrawn live
@@ -35,7 +35,7 @@ def watch_table(topics, newest, meter, dropped, now):
     """
     from rich.table import Table
 
-    from h2_bridge.telemetry.summary import summarize
+    from h2_bridge.cli.telemetry_summaries import summarize
 
     table = Table(title="Telemetry", header_style="bold cyan")
     table.add_column("Topic", style="bold", no_wrap=True)
@@ -95,7 +95,7 @@ def topic_view(name, spec, message, meter, dropped, now):
     Works for any message type without knowing it: the message dict is split by
     _split_fields() into plain fields (shown as Field | Value) and lists of
     sub-messages like motor_state (shown as one row per slot, one column per field).
-    Slots get names from layout.py where it has them (joints, fingers).
+    Slots get names from h2_bridge.robot.joints where it has them (joints, fingers).
 
     Parameters are as for watch_table, but for one topic: `message` is its newest
     Message (None until the first arrives) and `dropped` is its dropped count
@@ -160,12 +160,12 @@ def _split_fields(data, prefix=""):
 
 
 def _slot_names(spec, field):
-    """Names for the slots of a list field, from layout.py; [] if it has none."""
-    from h2_bridge.telemetry import layout
+    """Names for the slots of a list field, from h2_bridge.robot.joints; [] if it has none."""
+    from h2_bridge.robot import joints
 
     known = {
-        ("LowState_", "motor_state"): [name for name, *_ in layout.BODY_JOINTS],
-        ("HandState_", "motor_state"): [name for name, *_ in layout.HAND_JOINTS],
+        ("LowState_", "motor_state"): [name for name, *_ in joints.BODY_JOINTS],
+        ("HandState_", "motor_state"): [name for name, *_ in joints.HAND_JOINTS],
     }
     return known.get((spec.msg_type.__name__, field), [])
 

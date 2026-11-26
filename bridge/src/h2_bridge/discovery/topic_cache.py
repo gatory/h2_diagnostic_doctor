@@ -18,8 +18,8 @@ Rules:
 
 from datetime import datetime
 
-from h2_bridge.discovery.analysis import group_by_topic
-from h2_bridge.utils.cache import read_json, write_json
+from h2_bridge.discovery.snapshot_views import group_by_topic
+from h2_bridge.utils.state_files import read_json, write_json
 
 CACHE_FILE = "topics.json"
 CACHE_VERSION = 1
