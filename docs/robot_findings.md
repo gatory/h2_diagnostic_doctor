@@ -61,3 +61,24 @@ From the three 60 s recordings of 2026-11-26 (`outputs/telemetry/2026-11-26/`, r
 - **The two body IMUs agree in roll and pitch, not yaw.** pelvis - torso in roll and pitch equals minus the waist joints' roll and pitch (`waist_roll`, `waist_pitch`) to within 0.04 rad. Yaw differs by up to 0.48 rad while the waist yaw moves less than 0.08 rad: each IMU's yaw drifts on its own (no absolute heading), so yaw can't be compared.
 - **The hand IMUs' `temperature` reads 6489-6509** (the body IMUs: 78-81). *Open:* a different unit or scale; 6500 as centi-degrees would be 65.00 °C, close to the finger motors' 39-62 °C. Not used by checkup until confirmed.
 - **Battery cell spread** (max - min of the 18 cells): 11-30 mV. **`motorstate`** was 0 on every body and hand motor, and the hands' **`error`** was always `[0, 0]`. No NaN values anywhere.
+
+## Official LowState_ field meanings (Unitree H2 SDK docs)
+
+From Unitree's H2 SDK Development Guide, "Basic Services Interface" (last updated 2026-11-24). It covers the body only: `rt/lowstate` / `LowState_` and its `MotorState_` and `IMUState_` (`rt/lf/lowstate` is the 20 Hz copy). Hands, battery and main board aren't in it.
+
+| Field | Meaning (docs) | Used in |
+|---|---|---|
+| `mode_pr` | parallel mechanism (ankles and waist) control mode: **0 PR** (default), **1 AB** | dashboard title; checkup skips the ankle/waist angles in AB |
+| `mode_machine` | H2 model | dashboard title ("model") |
+| `tick` | increments every 1 ms | dashboard title ("up N s") |
+| `MotorState_.q`, `dq`, `ddq` | joint feedback position (rad), speed (rad/s), acceleration (rad/s²) | everywhere |
+| `MotorState_.tau_est` | joint feedback torque (no unit given) | dashboard "tau N·m?" |
+| `MotorState_.temperature[2]` | motor temperature: **surface and winding** | dashboard "T surface/winding" |
+| `MotorState_.vol` | terminal voltage of the motor | not shown: reads 0.0 on our robot |
+| `MotorState_.motorstate` | **error bits** (table below, in `robot/motors.py`) | dashboard "m/err"; checkup's motor_errors names them |
+| `MotorState_.mode` | current motor mode (the command side says 0 disable, 1 enable; the state reads 1 or 10 on our robot) | dashboard, still "?" |
+| `IMUState_.rpy`, `temperature` | Euler angles; IMU temperature (no unit given) | dashboard |
+
+- **AB mode changes what `q` means.** In AB mode the parallel-linkage slots (ankle roll/pitch 4, 5, 10, 11 and waist roll/pitch 13, 14: `PR_LINKAGE_JOINTS` in `robot/joints.py`) report raw motor positions, not joint angles. Checkup's joint-limit rule skips them and its IMU-agreement rule reports no data in AB mode. All our recordings so far are in PR mode.
+- **The docs' `MotorState_` has fields our SDK's message doesn't**: `q_raw`, `dq_raw`, `ddq_raw` ("reserve"). The Python SDK in use is a different version of the message; nothing reads them.
+- **Motor error codes** (`motorstate` bits): 0x1 Overcurrent, 0x2 Transient Overvoltage, 0x4 Sustained Overvoltage, 0x8 Transient Undervoltage, 0x10 Chip Overheating, 0x20 MOS Overheating/Overcooling, 0x40 MOS Temperature Anomaly, 0x80 Housing Overheating/Overcooling, 0x100 Housing Temperature Anomaly, 0x200 Winding Overheating, 0x400 Rotor Encoder 1 Error, 0x800 Rotor Encoder 2 Error, 0x1000 Output Encoder Error, 0x2000 Calibration/BOOT Data Error, 0x4000 Abnormal Reset, 0x8000 Motor Lock / Master Control Authentication Error, 0x10000 Chip Verification Error, 0x20000 Calibration Mode Warning, 0x40000 Communication Check Error, 0x80000 Driver Version Too Low, 0x40000000 Disconnection timeout (motor side), 0x80000000 Disconnection timeout (PC side). The hands send the same `MotorState_` type, so the same bits most likely apply there (unconfirmed).

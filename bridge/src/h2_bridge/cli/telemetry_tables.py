@@ -160,24 +160,33 @@ def _body_panel(body, bad):
     elif body is None:
         title = f"Body joints · {_WAITING}"
     else:
-        title = (f"Body joints · {_kv('mode_machine', body.mode_machine)} · "
-                 f"{_kv('mode_pr', body.mode_pr)} · {_kv('tick', body.tick)}")
+        # Field meanings: Unitree's H2 SDK docs, LowState_ (docs/robot_findings.md).
+        ab = body.mode_pr == joints.MODE_AB
+        mode_pr = f"{body.mode_pr} ({'AB: * = raw motor position, not an angle' if ab else 'PR'})"
+        title = (f"Body joints · {_kv('mode_pr', mode_pr)} · {_kv('model', body.mode_machine)} · "
+                 f"{_kv('up', f'{body.tick / 1000:.0f} s')}")
 
     table = _table(expand=False)
     table.add_column("#", justify="right", style=DIM, no_wrap=True, min_width=2)
     table.add_column("joint", style=LABEL, no_wrap=True)
-    for name, width in (("q", 5), ("dq", 5), ("tau", 5), ("T °C?", 5), ("m/s?", 4)):
+    for name, width in (("q", 5), ("dq", 5), ("tau", 5), ("T °C", 5), ("m/err", 5)):
         table.add_column(name, justify="right", no_wrap=True, min_width=width)
     if body is None:
         for slot, (name, *_) in enumerate(joints.BODY_JOINTS):
             table.add_row(str(slot), name, *[f"[{DIM}]-[/]"] * 5)
     else:
         for j in body.joints:
-            table.add_row(str(j.slot), j.name, _num(j.q, 2), _num(j.dq, 2), _num(j.tau, 1),
-                          "/".join(map(str, j.temperatures)), f"{j.mode}/{j.motorstate}")
+            raw = ab and j.slot in joints.PR_LINKAGE_JOINTS
+            table.add_row(str(j.slot), j.name + (" *" if raw else ""), _num(j.q, 2), _num(j.dq, 2), _num(j.tau, 1),
+                          "/".join(map(str, j.temperatures)), f"{j.mode}/{_err(j.motorstate)}")
     return Panel(table, title=title, title_align="left", expand=False,
-                 subtitle=_legend("q rad · dq rad/s · tau N·m? · T: 2 sensors?"),
+                 subtitle=_legend("q rad · dq rad/s · tau N·m? · T surface/winding · m/err: mode?/errors"),
                  subtitle_align="left")
+
+
+def _err(motorstate):
+    """A motor's error bits: '0' when clear, else hex (named in the Warnings panel: robot/motors.py)."""
+    return "0" if not motorstate else f"0x{motorstate:X}"
 
 
 def _hands_panel(snap):
@@ -189,7 +198,7 @@ def _hands_panel(snap):
         return _bad_shape("Hands")
     left, right = snap.hands["left"], snap.hands["right"]
 
-    columns = (("q", 5), ("dq", 5), ("tau", 5), ("T", 2), ("m/s", 3))
+    columns = (("q", 5), ("dq", 5), ("tau", 5), ("T", 2), ("m/err", 5))
     table = _table(expand=False)  # natural width: the numbers sit right next to the joint names
     table.collapse_padding = True  # 1 space between columns, not 2: room for both hands and the divider
     table.add_column("joint", style=LABEL, no_wrap=True)
@@ -208,7 +217,7 @@ def _hands_panel(snap):
                 continue
             m = hand.motors[slot]
             cells += [_num(m.q, 2), _num(m.dq, 2), _num(m.tau, 2),
-                      f"[{DIM}]-[/]" if m.temperature is None else str(m.temperature), f"{m.mode}/{m.motorstate}"]
+                      f"[{DIM}]-[/]" if m.temperature is None else str(m.temperature), f"{m.mode}/{_err(m.motorstate)}"]
         table.add_row(*cells)
 
     lines = []
@@ -222,7 +231,7 @@ def _hands_panel(snap):
                      f"{_kv('system', _num(hand.system_v, 2))}{_unit(' V?')}")
         lines.append(f"{side} {_kv('pads max', ' '.join(f'{p:.0f}' for p in hand.pad_max))}{_unit(' ?')}")
     return Panel(Group(table, *lines), title=f"Hands · [{LEFT}]left[/] │ [{RIGHT}]right[/]", title_align="left",
-                 subtitle=_legend("T °C? (thumb: none) · m/s: mode/motorstate? · pads: max of 16"),
+                 subtitle=_legend("T °C? (thumb: none) · m/err: mode?/error bits · pads: max of 16"),
                  subtitle_align="left")
 
 
