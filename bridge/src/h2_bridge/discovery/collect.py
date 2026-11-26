@@ -8,7 +8,7 @@ what it sees, without grouping or interpreting it (see models.py):
     DCPSSubscription  -> Endpoint(kind="reader")
 
 This is the only discovery module that touches DDS. 
-Work with finished Snapshot lives in analysis.py (views of it) and persistence.py (save/load).
+Work with finished Snapshot lives in snapshot_views.py (views of it) and snapshot_files.py (save/load).
 """
 
 import os
@@ -44,7 +44,7 @@ def collect_snapshot(interface, domain_id, secs=10):
         BuiltinTopicDcpsSubscription,
     )
 
-    from h2_bridge.dds import init_dds, make_participant
+    from h2_bridge.dds_setup import init_dds, make_participant
 
     taken_at = datetime.now().astimezone().isoformat(timespec="seconds")
 

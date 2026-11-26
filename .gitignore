@@ -74,3 +74,6 @@ CLAUDE.md
 
 # Outputs and Recordings
 bridge/outputs/
+bridge/cache/
+
+dashboard

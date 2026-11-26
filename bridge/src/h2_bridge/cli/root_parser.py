@@ -12,9 +12,9 @@ import argparse
 import sys
 
 from h2_bridge import __version__
-from h2_bridge.cli import discovery, telemetry
+from h2_bridge.cli import discovery_commands, telemetry_commands
 from h2_bridge.constants import DDS_DEFAULTS
-from h2_bridge.dds import DDSError
+from h2_bridge.dds_setup import DDSError
 
 
 def build_parser():
@@ -35,8 +35,8 @@ def build_parser():
     )
 
     commands = parser.add_subparsers(dest="command", metavar="<group>", required=True)
-    discovery.register(commands)
-    telemetry.register(commands)
+    discovery_commands.register(commands)
+    telemetry_commands.register(commands)
 
     return parser
 

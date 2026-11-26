@@ -62,18 +62,21 @@ class SavedFile(NamedTuple):
     interface: str  # "eth10", ...
 
 
-# Reverses output_path()'s file name: <name>_<HHMMSS>_<interface>.<ext>
-_FILE_PATTERN = re.compile(r"(?P<name>.+)_(?P<time>\d{6})_(?P<interface>.+)\.(?P<ext>[A-Za-z0-9]+)")
+# Reverses output_path()'s file name, once the extension is removed: <name>_<HHMMSS>_<interface>
+_FILE_PATTERN = re.compile(r"(?P<name>.+)_(?P<time>\d{6})_(?P<interface>.+)")
 
 
 def find_outputs(group, ext="json"):
-    """List the files saved under outputs/<group>/, newest first.
+    """List the files saved under outputs/<group>/ with extension `ext`, newest first.
 
+    `ext` is matched exactly and may contain dots ("jsonl.gz"): it's removed
+    before the name is split, so it can't leak into the interface part.
     Files that don't follow the output_path() pattern are skipped.
     """
+    suffix = f".{ext}"
     files = []
-    for path in (OUTPUT_DIR / group).glob(f"*/*.{ext}"):
-        match = _FILE_PATTERN.fullmatch(path.name)
+    for path in (OUTPUT_DIR / group).glob(f"*/*{suffix}"):
+        match = _FILE_PATTERN.fullmatch(path.name[: -len(suffix)])
         if match:
             files.append(SavedFile(path, path.parent.name, match["time"], match["name"], match["interface"]))
     return sorted(files, key=lambda f: (f.date, f.time), reverse=True)
