@@ -123,6 +123,17 @@ The 6 topics, about 280 messages/s in total, are what the dashboard draws: `rt/l
 
 **How the data flows.** A *source* hands out every message; each consumer keeps what it needs. The recorder writes all of them; the rate meter counts every message; the dashboard keeps only the newest per topic for the screen. The source is the robot (`LiveSource`) or, for `replay`, a recording (`ReplaySource`), behind the same interface.
 
+### `motion_tests/`: scripts that move the robot
+
+Not part of `h2-doctor`, which only ever listens. These standalone scripts **send commands**:
+
+```bash
+uv run python motion_tests/head_lowcmd.py --dry-run   # print the planned head targets, no robot
+uv run python motion_tests/head_lowcmd.py eth10       # on the Jetson; robot on the gantry
+```
+
+`head_lowcmd.py` moves only the head (yaw ±10°, pitch ±5°, slowly) through `rt/lowcmd`. That **releases Unitree's motion control**, so nothing balances the robot: gantry only, someone at the e-stop. Every other motor is held in damping. **Ctrl-C stops it at once** (head soft, all damping), and it stops itself if `rt/lowstate` goes quiet, a head motor reports an error, or the head leaves its clamped range. At the end it asks before handing control back to Unitree's mode. It needs the SDK's CRC library: install the SDK editable on the Jetson (see `docs/robot_findings.md`).
+
 ### Saved files
 
 Saved files go in `bridge/outputs/` (ignored by git), organized by group and date:
