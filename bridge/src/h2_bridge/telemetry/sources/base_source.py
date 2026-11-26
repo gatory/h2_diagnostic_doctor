@@ -28,10 +28,14 @@ class Source(ABC):
         The topics this source delivers.
     done : bool
         True once the source has nothing more to give (a recording's end). A live source never is.
+    dropped : dict[str, int] | None
+        Messages lost per topic because poll() fell behind. None for a source that
+        can't drop (a recording). A subclass that can drop sets its own dict in __init__.
     """
 
     live: bool
     done = False
+    dropped = None  # immutable default: safe on the class (a {} here would be shared by every source)
 
     def __init__(self, topics):
         """topics: {name: TopicSpec} this source delivers."""

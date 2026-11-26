@@ -3,20 +3,14 @@
 poll() returns every message whose time has come, keeping the recording's
 original gaps (scaled by `speed`) and its original timestamps. now() runs on
 the recording's clock, so ages and rates measured on a replay match the live
-run. The file is read line by line, so long recordings don't have to fit in memory.
-Reads gzipped (.jsonl.gz) and plain (.jsonl) recordings.
+run. Reading the file (one line at a time, gzipped or plain, cut off or not)
+is RecordingReader's job; this class only decides when each message is due.
 """
 
 import difflib
-import gzip
-import json
 import time
-import zlib
 
-from h2_bridge.telemetry.recording_format import open_recording, read_header, read_line
-
-# What reading a gzip file that was cut off (recorder killed mid-write) raises.
-_CUT_OFF = (EOFError, zlib.error, gzip.BadGzipFile)
+from h2_bridge.telemetry.recording_format import RecordingReader
 from h2_bridge.telemetry.sources.base_source import Source, TopicError
 
 
@@ -45,16 +39,13 @@ class ReplaySource(Source):
         self.path = path
         self.speed = speed
         self.done = False
-        self.truncated = False
-        self.footer = None
         self._started = None
-        self._file = open_recording(path)
+        self._reader = RecordingReader(path)  # OSError / ValueError: missing file, not a recording
         try:
-            self.header, recorded = read_header(self._file)
-            super().__init__(_select_topics(recorded, topics))  # TopicError if not recorded
+            super().__init__(_select_topics(self._reader.topics, topics))  # TopicError if not recorded
             self._next = self._read_next()  # first message, kept until its time comes
         except Exception:
-            self._file.close()  # bad file or topic: don't leak the handle
+            self._reader.close()  # bad topic or file: don't leak the handle
             raise
         self._first_t = None if self._next is None else self._next.t
         self._last_t = self._first_t  # newest message handed out so far
@@ -92,39 +83,31 @@ class ReplaySource(Source):
             return self._last_t
         return self._first_t + (time.monotonic() - self._started) * self.speed
 
-    def _read_next(self):
-        """Next message on one of our topics, or None at the end (file end, footer, or cut-off)."""
-        while True:
-            try:
-                line = next(self._file, None)
-            except _CUT_OFF:  # gzip stream ends mid-way: everything before it was read
-                self.truncated = True
-                return None
-            if line is None:
-                return None
-            try:
-                record = read_line(line)
-            except json.JSONDecodeError:
-                if not self._rest_is_empty():  # more after it: real corruption
-                    raise
-                self.truncated = True  # cut-off last line: treat as the end
-                return None
-            if isinstance(record, dict):  # the footer: the recording ends here
-                self.footer = record
-                return None
-            if record.topic in self.topics:
-                return record
+    @property
+    def header(self):
+        """The recording's header (started, host, interface, domain_id, topics)."""
+        return self._reader.header
 
-    def _rest_is_empty(self):
-        """True if nothing readable follows (a cut-off gzip tail counts as nothing)."""
-        try:
-            return not self._file.read().strip()
-        except _CUT_OFF:
-            return True
+    @property
+    def footer(self):
+        """The recording's footer once reached; None if not yet, or if the recorder died."""
+        return self._reader.footer
+
+    @property
+    def truncated(self):
+        """True if the file was cut off (recording killed mid-write)."""
+        return self._reader.truncated
+
+    def _read_next(self):
+        """Next message on one of our topics, or None at the end."""
+        while (message := self._reader.next_message()) is not None:
+            if message.topic in self.topics:
+                return message
+        return None
 
     def close(self):
         """Close the file. Safe to call twice."""
-        self._file.close()
+        self._reader.close()
 
 
 def _select_topics(recorded, names=None):
