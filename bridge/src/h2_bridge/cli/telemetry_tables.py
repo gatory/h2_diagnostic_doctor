@@ -1,12 +1,14 @@
 """The live dashboard for `h2-doctor telemetry watch` and `replay`: every core topic on one screen.
 
-    dashboard(topics, newest, meter, dropped, now)   -> one rich renderable, redrawn each poll
+    dashboard(snapshot, checkup)   -> one rich renderable, redrawn each poll
+                                     (telemetry.snapshot.Snapshot, checkup.engine.Checkup or None)
 
-Layout (about 150 x 46; on a smaller terminal it gets cut off at the right and bottom):
+Layout (about 155 x 50; on a smaller terminal it gets cut off at the right and bottom):
 
-    ┌ Topics (row per topic) ┬ Battery ─────┬ Main board ┐
-    ├ Body joints (31) ──────┼ Hands: joint x left │ right ┤
-    │                        ├ IMUs: pelvis · torso · hands ┤
+    ┌ Topics (row per topic) ┬ Battery ────┬ Warnings (checkup's findings) ┐
+    │                        ├ Main board ─┤                               │
+    ├ Body joints (31) ──────┼ Hands: joint x left │ right ────────────────┤
+    │                        ├ IMUs: pelvis · torso · hands ────────────────┤
 
 Every panel is as wide as its content (no stretching), so values sit next to
 their labels; the hands and IMUs panels share one column and so one width.
@@ -15,17 +17,16 @@ Presentation only: each function takes telemetry data and returns rich objects;
 printing (or redrawing it live) is up to the caller (cli/telemetry_commands.py).
 
 Three rules:
-- Facts, no verdicts. The only verdict colors are topic health (rate, staleness,
-  drops). Joint limits, temperatures and error bits are shown as numbers: judging
-  them is checkup's job. A "?" marks a unit or meaning that isn't confirmed
+- Facts, no verdicts of its own. Verdicts come from checkup: the topic colors
+  (its topic_flow rule) and the Warnings panel (its findings). Everything else
+  is shown as numbers. A "?" marks a unit or meaning that isn't confirmed
   (docs/robot_findings.md).
 - One style per kind of text, everywhere, so a title never looks like a value:
   HEADER for column titles, LABEL for row labels and field names, plain for
   values, DIM for units, "?", legends and placeholders. The one exception: the
   two hands' values are LEFT and RIGHT, so the sides can't be mixed up.
-- Getting values out of a message (the *_rows / *_fields functions: plain data,
-  no rich) is kept apart from drawing them (the _*_panel functions), so the
-  extraction can later move into telemetry for checkup and the server to share.
+- Only drawing happens here. Getting named values out of messages is
+  telemetry/snapshot.py's job, shared with checkup (and later the server).
 """
 
 from rich import box
@@ -33,23 +34,9 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 
+from h2_bridge.checkup.models import Status
 from h2_bridge.robot import joints, sensors
-
-# Core topic names, as in telemetry/core_topics.py.
-LOWSTATE = "rt/lf/lowstate"
-TORSO_IMU = "rt/lf/secondary_imu"
-BATTERY = "rt/lf/bmsstate"
-MAIN_BOARD = "rt/lf/mainboardstate"
-LEFT_HAND = "rt/dex5/left/state"
-RIGHT_HAND = "rt/dex5/right/state"
-
-# A topic counts as healthy at >= this fraction of its expected rate.
-_RATE_OK = 0.8
-
-# A topic is stale (shown red) once its newest message is older than this many
-# expected periods, and at least _STALE_MIN_S seconds old.
-_STALE_PERIODS = 5
-_STALE_MIN_S = 0.5
+from h2_bridge.telemetry.snapshot import BATTERY, HANDS, LOWSTATE, MAIN_BOARD
 
 # Text styles (see the module docstring). Values have no style: plain text.
 HEADER = "bold cyan"  # column titles
@@ -58,191 +45,146 @@ DIM = "dim"  # units, "?", legends, placeholders
 LEFT = "orange1"  # the left hand's values (hands and IMU panels)
 RIGHT = "dodger_blue1"  # the right hand's values; clearly blue, not the HEADER cyan
 
+# Checkup verdicts: the color of a topic's rate, and of a finding's status in the Warnings panel.
+VERDICT = {Status.PASS: "green", Status.WARN: "yellow", Status.FAIL: "bold red"}
+
+# The Warnings panel lists at most this many findings (worst first), then "and N more".
+_MAX_WARNINGS = 10
+
 _WAITING = f"[{DIM}]waiting for data...[/]"
 
 
-def dashboard(topics, newest, meter, dropped, now):
-    """The whole screen.
+def dashboard(snap, checkup=None):
+    """The whole screen for one Snapshot; `checkup` (the engine, run on the same snapshots) gives the verdicts."""
+    power = Table.grid()  # one column: battery over main board, at the same width
+    power.add_row(_safe(_battery_panel, "Battery", snap.battery, BATTERY in snap.bad))
+    power.add_row(_safe(_board_panel, "Main board", snap.board, MAIN_BOARD in snap.bad))
 
-    Parameters
-    ----------
-    topics : dict[str, TopicSpec]
-        What the source delivers, in display order.
-    newest : dict[str, Message]
-        The newest message per topic so far (from latest()); a topic may be missing.
-    meter : RateMeter
-        Rates, measured from every message.
-    dropped : dict[str, int] | None
-        Messages lost per topic (LiveSource.dropped); None for a replay, which can't drop.
-    now : float
-        The source's clock (source.now()), for rates and ages.
-    """
-    data = {topic: message.data for topic, message in newest.items()}
-
-    # Grids without expand or ratios: each column is as wide as its widest panel.
-    top = Table.grid(padding=(0, 1))
-    top.add_row(_topics_panel(topics, newest, meter, dropped, now),
-                _safe(_battery_panel, "Battery", data.get(BATTERY)),
-                _safe(_board_panel, "Main board", data.get(MAIN_BOARD)))
+    # Grids without expand or ratios: each column is as wide as its widest panel;
+    # only the Warnings panel takes whatever width is left.
+    top = Table.grid(padding=(0, 1), expand=True)
+    top.add_column()
+    top.add_column()
+    top.add_column(ratio=1)
+    top.add_row(_topics_panel(snap, checkup), power, _warnings_panel(checkup))
 
     right = Table.grid()  # one column: the hands and IMUs panels get the same width
-    right.add_row(_hands_panel(data.get(LEFT_HAND), data.get(RIGHT_HAND)))
-    right.add_row(_safe(_imu_panel, "IMUs", data))
+    right.add_row(_hands_panel(snap))
+    right.add_row(_imu_panel(snap))
 
     middle = Table.grid(padding=(0, 1))
-    # Not _safe: before data the body panel draws its rows with dashes, so it keeps its
-    # width and the hands and IMUs don't jump sideways when the first message arrives.
-    middle.add_row(_body_panel(data.get(LOWSTATE)), right)
+    # The body panel draws its rows with dashes before data, so it keeps its width and
+    # the hands and IMUs don't jump sideways when the first message arrives.
+    middle.add_row(_body_panel(snap.body, LOWSTATE in snap.bad), right)
 
     return Group(top, middle)
-
-
-# ---------------------------------------------------------------- Rows: message data -> plain values
-
-
-def body_rows(lowstate):
-    """One tuple per body joint: (slot, name, q, dq, tau_est, temperatures, mode, motorstate)."""
-    rows = []
-    for slot, (name, _, _) in enumerate(joints.BODY_JOINTS):
-        m = lowstate["motor_state"][slot]
-        rows.append((slot, name, m["q"], m["dq"], m["tau_est"], m["temperature"], m["mode"], m["motorstate"]))
-    return rows
-
-
-def hand_rows(hand):
-    """One tuple per hand motor: (slot, name, q, dq, tau_est, temperature or None, mode, motorstate).
-
-    temperature is None for the position-only thumb slots, which report none.
-    """
-    rows = []
-    for slot, (name, _, _, position_only) in enumerate(joints.HAND_JOINTS):
-        m = hand["motor_state"][slot]
-        temperature = None if position_only else m["temperature"][0]
-        rows.append((slot, name, m["q"], m["dq"], m["tau_est"], temperature, m["mode"], m["motorstate"]))
-    return rows
-
-
-def pad_maxima(hand):
-    """The highest reading on each of the hand's pressure pads (16 pads x 12 cells)."""
-    return [max(pad["pressure"]) for pad in hand["press_sensor_state"]]
-
-
-def imu_fields(imu):
-    """{"rpy", "gyro", "accel": 3 floats each; "temp": int} from an IMUState_ dict."""
-    return {"rpy": imu["rpy"], "gyro": imu["gyroscope"], "accel": imu["accelerometer"], "temp": imu["temperature"]}
-
-
-def battery_fields(bms):
-    """The battery's values, cells trimmed to the real ones (robot/sensors.py)."""
-    cells = bms["cell_vol"][: sensors.NUM_BMS_CELLS]
-    return {
-        "soc": bms["soc"],
-        "soh": bms["soh"],
-        "volts": bms["bmsvoltage"][0] / 1000,  # mV -> V; equals the sum of the cells
-        "current": bms["current"],
-        "cell_min": min(cells),
-        "cell_max": max(cells),
-        "temperatures": _trim_zeros(bms["temperature"]),
-        "cycle": bms["cycle"],
-        "state": bms["bmsstate"],
-        "version": f"{bms['version_high']}.{bms['version_low']}",
-    }
-
-
-def board_fields(board):
-    """The main board's values, temperatures trimmed to the real ones (robot/sensors.py)."""
-    return {
-        "temperatures": board["temperature"][: sensors.NUM_MAINBOARD_TEMPS],
-        "fans": board["fan_state"],
-        "state": board["state"],
-        "value": board["value"],
-    }
-
-
-def _trim_zeros(values):
-    """`values` without its trailing zeros (unused slots)."""
-    end = len(values)
-    while end and values[end - 1] == 0:
-        end -= 1
-    return values[:end]
 
 
 # ---------------------------------------------------------------- Panels: plain values -> rich
 
 
-def _safe(build, title, payload):
-    """build(payload), or a placeholder panel titled `title` while there's no data
-    (payload None) or if the data has an unexpected shape: one odd message must
-    never crash the screen."""
-    if payload is None:
+def _safe(build, title, part, bad):
+    """build(part), or a placeholder panel titled `title`: "(unexpected message shape)"
+    if the topic's newest message couldn't be read (`bad`), "waiting for data" while
+    there's none yet (`part` None)."""
+    if bad:
+        return _bad_shape(title)
+    if part is None:
         return Panel(_WAITING, title=title, title_align="left", border_style=DIM)
-    try:
-        return build(payload)
-    except (KeyError, IndexError, TypeError, ValueError, ZeroDivisionError):
-        return Panel(f"[{DIM}](unexpected message shape)[/]", title=title, title_align="left", border_style="yellow")
+    return build(part)
 
 
-def _topics_panel(topics, newest, meter, dropped, now):
-    """One row per topic: rate (recent / expected), average, time since the last message, drops (live only)."""
+def _bad_shape(title):
+    return Panel(f"[{DIM}](unexpected message shape)[/]", title=title, title_align="left", border_style="yellow")
+
+
+def _topics_panel(snap, checkup):
+    """One row per topic: rate (recent / expected), average, time since the last message, drops (live only).
+
+    The rate is colored by checkup's verdict on the topic (green ok, yellow slow,
+    red silent or stale), plain before it has one.
+    """
+    live = any(status.dropped is not None for status in snap.topics.values())
     table = _table(expand=False)
     table.add_column("topic", style=LABEL, no_wrap=True)
-    for name in ("Hz", "Avg", "Last") + (("Drop",) if dropped is not None else ()):
+    for name in ("Hz", "Avg", "Last") + (("Drop",) if live else ()):
         table.add_column(name, justify="right", no_wrap=True)
-    for name, spec in topics.items():
-        message = newest.get(name)
-        stale = message is not None and _is_stale(spec, now - message.t)
+    for name, status in snap.topics.items():
+        verdict = checkup.status_of("topic_flow", name) if checkup else None
+        failing = verdict == Status.FAIL
         row = [name.removeprefix("rt/"),
-               "[red]0 (stale)[/]" if stale else _rate_cell(meter.hz(name, now), spec.expected_hz),
-               _avg_cell(meter.average_hz(name)),
-               _age_cell(message, now, stale)]
-        if dropped is not None:
-            n = dropped.get(name, 0)
+               _rate_cell(status.hz, status.expected_hz, verdict),
+               _avg_cell(status.avg_hz),
+               _age_cell(status.age_s, failing)]
+        if live:
+            n = status.dropped or 0
             row.append("[green]0[/]" if n == 0 else f"[bold red]{n}[/]")
         table.add_row(*row)
 
-    subtitle = _legend(f"Hz: last {meter.window_s:.0f}s / expected · Avg: since start")
-    if dropped is not None and sum(dropped.values()):
-        subtitle = "[bold red]dropped: values are behind[/]"
+    subtitle = _legend("Hz: last 2s / expected · Avg: since start")
+    if live and sum(status.dropped or 0 for status in snap.topics.values()):
+        subtitle = "[bold red]messages dropped: rates read low[/]"
     return Panel(table, title="Topics", title_align="left", subtitle=subtitle, subtitle_align="left")
 
 
-def _body_panel(lowstate):
+def _warnings_panel(checkup):
+    """checkup's current findings (debounced), worst first; "none" when everything passes."""
+    title = "Warnings"
+    if checkup is None:
+        return Panel(f"[{DIM}](checkup not running)[/]", title=title, title_align="left", border_style=DIM)
+    findings = checkup.findings()
+    if not findings:
+        body = "[green]none[/]" if checkup.started is not None else _WAITING
+        return Panel(body, title=title, title_align="left",
+                     subtitle=_legend("from checkup's rules"), subtitle_align="left")
+    table = Table.grid(padding=(0, 1))
+    table.add_column(no_wrap=True)  # status
+    table.add_column(style=LABEL, no_wrap=True)  # subject
+    table.add_column(overflow="ellipsis", no_wrap=True)  # message
+    for f in findings[:_MAX_WARNINGS]:
+        table.add_row(f"[{VERDICT[f.status]}]{f.status.value.upper()}[/]", f.subject.removeprefix("rt/"), f.message)
+    extra = len(findings) - _MAX_WARNINGS
+    parts = [table] + ([f"[{DIM}]... and {extra} more[/]"] if extra > 0 else [])
+    worst = VERDICT[findings[0].status]
+    return Panel(Group(*parts), title=f"{title} ({len(findings)})", title_align="left", border_style=worst,
+                 subtitle=_legend("full report: h2-doctor checkup"), subtitle_align="left")
+
+
+def _body_panel(body, bad):
     """The 31 joints; with no data yet (None), their names with dashes, at the same width."""
-    try:
-        rows = None if lowstate is None else body_rows(lowstate)
-        title = "Body joints · " + (_WAITING if lowstate is None else
-                                    f"{_kv('mode_machine', lowstate['mode_machine'])} · "
-                                    f"{_kv('mode_pr', lowstate['mode_pr'])} · {_kv('tick', lowstate['tick'])}")
-    except (KeyError, IndexError, TypeError, ValueError):
-        rows, title = None, f"Body joints · [{DIM}](unexpected message shape)[/]"
+    if bad:
+        title = f"Body joints · [{DIM}](unexpected message shape)[/]"
+    elif body is None:
+        title = f"Body joints · {_WAITING}"
+    else:
+        title = (f"Body joints · {_kv('mode_machine', body.mode_machine)} · "
+                 f"{_kv('mode_pr', body.mode_pr)} · {_kv('tick', body.tick)}")
 
     table = _table(expand=False)
     table.add_column("#", justify="right", style=DIM, no_wrap=True, min_width=2)
     table.add_column("joint", style=LABEL, no_wrap=True)
     for name, width in (("q", 5), ("dq", 5), ("tau", 5), ("T °C?", 5), ("m/s?", 4)):
         table.add_column(name, justify="right", no_wrap=True, min_width=width)
-    if rows is None:
+    if body is None:
         for slot, (name, *_) in enumerate(joints.BODY_JOINTS):
             table.add_row(str(slot), name, *[f"[{DIM}]-[/]"] * 5)
     else:
-        for slot, name, q, dq, tau, temps, mode, state in rows:
-            table.add_row(str(slot), name, _num(q, 2), _num(dq, 2), _num(tau, 1),
-                          "/".join(map(str, temps)), f"{mode}/{state}")
+        for j in body.joints:
+            table.add_row(str(j.slot), j.name, _num(j.q, 2), _num(j.dq, 2), _num(j.tau, 1),
+                          "/".join(map(str, j.temperatures)), f"{j.mode}/{j.motorstate}")
     return Panel(table, title=title, title_align="left", expand=False,
                  subtitle=_legend("q rad · dq rad/s · tau N·m? · T: 2 sensors?"),
                  subtitle_align="left")
 
 
-def _hands_panel(left, right):
+def _hands_panel(snap):
     """Both hands in one table: one row per finger joint, the left hand's values, a divider, then the right's.
 
     One shared joint column keeps it narrow. A hand with no data yet shows dim dashes.
     """
-    try:
-        sides = [hand_rows(h) if h is not None else None for h in (left, right)]
-        pads = [pad_maxima(h) if h is not None else None for h in (left, right)]
-    except (KeyError, IndexError, TypeError, ValueError):
-        return Panel(f"[{DIM}](unexpected message shape)[/]", title="Hands", title_align="left", border_style="yellow")
+    if any(topic in snap.bad for topic in HANDS.values()):
+        return _bad_shape("Hands")
+    left, right = snap.hands["left"], snap.hands["right"]
 
     columns = (("q", 5), ("dq", 5), ("tau", 5), ("T", 2), ("m/s", 3))
     table = _table(expand=False)  # natural width: the numbers sit right next to the joint names
@@ -255,27 +197,27 @@ def _hands_panel(left, right):
             table.add_column(name, justify="right", no_wrap=True, min_width=width, style=style)
     for slot, (name, *_) in enumerate(joints.HAND_JOINTS):
         cells = [name]
-        for side, rows in zip(("left", "right"), sides):
+        for side, hand in (("left", left), ("right", right)):
             if side == "right":
                 cells.append("│")
-            if rows is None:
+            if hand is None:
                 cells += [f"[{DIM}]-[/]"] * len(columns)
                 continue
-            _, _, q, dq, tau, temperature, mode, state = rows[slot]
-            cells += [_num(q, 2), _num(dq, 2), _num(tau, 2),
-                      f"[{DIM}]-[/]" if temperature is None else str(temperature), f"{mode}/{state}"]
+            m = hand.motors[slot]
+            cells += [_num(m.q, 2), _num(m.dq, 2), _num(m.tau, 2),
+                      f"[{DIM}]-[/]" if m.temperature is None else str(m.temperature), f"{m.mode}/{m.motorstate}"]
         table.add_row(*cells)
 
     lines = []
-    for side, style, hand, maxima in (("left ", LEFT, left, pads[0]), ("right", RIGHT, right, pads[1])):
+    for side, style, hand in (("left ", LEFT, left), ("right", RIGHT, right)):
         side = f"[bold {style}]{side}[/]"
         if hand is None:
             lines.append(f"{side} {_WAITING}")
             continue
-        lines.append(f"{side} {_kv('error', hand['error'])} · "
-                     f"{_kv('power', _num(hand['power_v'], 2))}{_unit(' V?')} {_num(hand['power_a'], 3)}{_unit(' A?')} · "
-                     f"{_kv('system', _num(hand['system_v'], 2))}{_unit(' V?')}")
-        lines.append(f"{side} {_kv('pads max', ' '.join(f'{p:.0f}' for p in maxima))}{_unit(' ?')}")
+        lines.append(f"{side} {_kv('error', list(hand.error))} · "
+                     f"{_kv('power', _num(hand.power_v, 2))}{_unit(' V?')} {_num(hand.power_a, 3)}{_unit(' A?')} · "
+                     f"{_kv('system', _num(hand.system_v, 2))}{_unit(' V?')}")
+        lines.append(f"{side} {_kv('pads max', ' '.join(f'{p:.0f}' for p in hand.pad_max))}{_unit(' ?')}")
     return Panel(Group(table, *lines), title=f"Hands · [{LEFT}]left[/] │ [{RIGHT}]right[/]", title_align="left",
                  subtitle=_legend("T °C? (thumb: none) · m/s: mode/motorstate? · pads: max of 16"),
                  subtitle_align="left")
@@ -287,15 +229,15 @@ def _table(expand=True):
                  pad_edge=False, padding=(0, 1))
 
 
-def _imu_panel(data):
+def _imu_panel(snap):
     """Pelvis (inside lowstate), torso (secondary_imu), and each hand's IMU, side by side."""
-    sources = {
-        "pelvis": data.get(LOWSTATE, {}).get("imu_state"),
-        "torso": data.get(TORSO_IMU),
-        "left hand": data.get(LEFT_HAND, {}).get("imu_state"),
-        "right hand": data.get(RIGHT_HAND, {}).get("imu_state"),
+    hands = snap.hands
+    fields = {
+        "pelvis": snap.body and snap.body.imu,
+        "torso": snap.torso_imu,
+        "left hand": hands["left"] and hands["left"].imu,
+        "right hand": hands["right"] and hands["right"].imu,
     }
-    fields = {name: imu_fields(imu) if imu else None for name, imu in sources.items()}
 
     table = _table(expand=False)
     table.add_column("", style=LABEL, no_wrap=True, min_width=5)
@@ -304,42 +246,40 @@ def _imu_panel(data):
         style = side_style.get(name, "")
         table.add_column(name, justify="right", no_wrap=True, min_width=17,  # "+0.00 +0.00 +0.00"
                          style=style, header_style=f"bold {style}" if style else HEADER)
-    for key, label in (("rpy", "rpy"), ("gyro", "gyro"), ("accel", "accel"), ("temp", "temp?")):
+    for key, label in (("rpy", "rpy"), ("gyro", "gyro"), ("accel", "accel"), ("temperature", "temp?")):
         cells = []
-        for f in fields.values():
-            if f is None:
+        for imu in fields.values():
+            if imu is None:
                 cells.append(f"[{DIM}]-[/]")
-            elif key == "temp":
-                cells.append(str(f[key]))
+            elif key == "temperature":
+                cells.append(str(imu.temperature))
             else:
-                cells.append(" ".join(_num(v, 2) for v in f[key]))
+                cells.append(" ".join(_num(v, 2) for v in getattr(imu, key)))
         table.add_row(label, *cells)
     return Panel(table, title="IMUs", title_align="left",
                  subtitle=_legend("rad · rad/s · m/s² · pelvis - torso = the waist's rotation"),
                  subtitle_align="left")
 
 
-def _battery_panel(bms):
-    f = battery_fields(bms)
+def _battery_panel(b):
     table = _fields_grid()
-    table.add_row("charge", f"{f['soc']}{_unit('%')} · {_kv('health', f['soh'])}{_unit('%')}")
-    table.add_row("voltage", f"{f['volts']:.2f}{_unit(' V')} · {_kv('current', f['current'])}{_unit(' mA?')}")
-    table.add_row("cells", f"{f['cell_min']}-{f['cell_max']}{_unit(' mV')} · "
-                           f"{_kv('spread', f['cell_max'] - f['cell_min'])}{_unit(' mV')}")
-    table.add_row("temps", " ".join(map(str, f["temperatures"])) + _unit(" °C?"))
-    table.add_row("cycles", f"{f['cycle']} · {_kv('version', f['version'])}")
-    table.add_row("state", " ".join(map(str, f["state"])) + _unit(" ?"))
+    table.add_row("charge", f"{b.soc}{_unit('%')} · {_kv('health', b.soh)}{_unit('%')}")
+    table.add_row("voltage", f"{b.volts:.2f}{_unit(' V')} · {_kv('current', b.current)}{_unit(' mA?')}")
+    table.add_row("cells", f"{b.cell_min}-{b.cell_max}{_unit(' mV')} · "
+                           f"{_kv('spread', b.cell_spread)}{_unit(' mV')}")
+    table.add_row("temps", " ".join(map(str, b.temperatures)) + _unit(" °C?"))
+    table.add_row("cycles", f"{b.cycle} · {_kv('version', b.version)}")
+    table.add_row("state", " ".join(map(str, b.state)) + _unit(" ?"))
     return Panel(table, title="Battery", title_align="left",
                  subtitle=_legend(f"{sensors.NUM_BMS_CELLS} cells"), subtitle_align="left")
 
 
 def _board_panel(board):
-    f = board_fields(board)
     table = _fields_grid()
-    table.add_row("temps", " ".join(map(str, f["temperatures"])) + _unit(" °C?"))
-    table.add_row("fans", " ".join(map(str, f["fans"])) + _unit(" ?"))
-    table.add_row("state", " ".join(map(str, f["state"])) + _unit(" ?"))
-    table.add_row("value", " ".join(_num(v, 2) for v in f["value"]) + _unit(" ?"))
+    table.add_row("temps", " ".join(map(str, board.temperatures)) + _unit(" °C?"))
+    table.add_row("fans", " ".join(map(str, board.fans)) + _unit(" ?"))
+    table.add_row("state", " ".join(map(str, board.state)) + _unit(" ?"))
+    table.add_row("value", " ".join(_num(v, 2) for v in board.value) + _unit(" ?"))
     return Panel(table, title="Main board", title_align="left",
                  subtitle=_legend("which part each temp is: unknown"), subtitle_align="left")
 
@@ -377,18 +317,12 @@ def _num(value, decimals=3):
     return f"{value:+.{decimals}f}"
 
 
-def _is_stale(spec, age):
-    """True if a topic's newest message is too old for its expected rate."""
-    limit = _STALE_PERIODS / spec.expected_hz if spec.expected_hz else 0.0
-    return age > max(limit, _STALE_MIN_S)
-
-
-def _age_cell(message, now, stale):
-    """'0.0s' since the newest message; red when stale, '-' before the first."""
-    if message is None:
+def _age_cell(age, failing):
+    """'0.0s' since the newest message; red when checkup fails the topic, '-' before the first."""
+    if age is None:
         return "-"
-    text = f"{now - message.t:.1f}s"
-    return f"[red]{text}[/]" if stale else text
+    text = f"{age:.1f}s"
+    return f"[red]{text}[/]" if failing else text
 
 
 def _avg_cell(hz):
@@ -396,11 +330,10 @@ def _avg_cell(hz):
     return f"[{DIM}]-[/]" if hz is None else f"{hz:.1f}"
 
 
-def _rate_cell(hz, expected):
-    """'20.1 / 20' colored green (on rate), yellow (slow), red (silent), plain (no expectation)."""
-    if expected is None:
-        return f"{hz:.1f}" if hz else f"[{DIM}]0[/]"
-    text = f"{hz:.1f} / {expected:g}"
-    if hz == 0:
-        return f"[red]{text}[/]"
-    return f"[green]{text}[/]" if hz >= _RATE_OK * expected else f"[yellow]{text}[/]"
+def _rate_cell(hz, expected, verdict):
+    """'20.1 / 20' in checkup's verdict color (green, yellow, red); plain with no verdict yet."""
+    text = f"{hz:.1f}" if expected is None else f"{hz:.1f} / {expected:g}"
+    style = VERDICT.get(verdict)
+    if style:
+        return f"[{style}]{text}[/]"
+    return text if hz else f"[{DIM}]{text}[/]"
