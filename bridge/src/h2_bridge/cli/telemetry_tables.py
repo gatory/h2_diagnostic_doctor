@@ -17,7 +17,7 @@ _STALE_MIN_S = 0.5
 
 
 def watch_table(topics, newest, meter, dropped, now):
-    """One row per watched topic: its rate, how long since the last message, and a summary.
+    """One row per watched topic: its rate (recent and average), how long since the last message, and a summary.
 
     Parameters
     ----------
@@ -41,6 +41,7 @@ def watch_table(topics, newest, meter, dropped, now):
     table.add_column("Topic", style="bold", no_wrap=True)
     table.add_column("Type", style="magenta", no_wrap=True)
     table.add_column("Hz", justify="right", no_wrap=True)
+    table.add_column("Avg", justify="right", no_wrap=True)
     table.add_column("Last", justify="right", no_wrap=True)
     table.add_column("Summary", overflow="ellipsis", no_wrap=True)
 
@@ -51,6 +52,7 @@ def watch_table(topics, newest, meter, dropped, now):
             name,
             spec.msg_type.__name__,
             "[red]0 (stale)[/]" if stale else _rate_cell(meter.hz(name, now), spec.expected_hz),
+            _avg_cell(meter.average_hz(name)),
             _age_cell(message, now, stale),
             "[dim]waiting for data...[/]" if message is None else summarize(spec, message.data),
         )
@@ -63,6 +65,11 @@ def watch_table(topics, newest, meter, dropped, now):
         )
     table.caption = caption
     return table
+
+
+def _avg_cell(hz):
+    """Average rate since the start; '-' until a topic has 2 messages."""
+    return "[dim]-[/]" if hz is None else f"{hz:.1f}"
 
 
 def _is_stale(spec, age):
@@ -106,7 +113,7 @@ def topic_view(name, spec, message, meter, dropped, now):
 
     status = (
         f"[bold]{name}[/]  [magenta]{spec.msg_type.__name__}[/]  ·  "
-        f"{_rate_cell(meter.hz(name, now), spec.expected_hz)} Hz  ·  "
+        f"{_rate_cell(meter.hz(name, now), spec.expected_hz)} Hz  ·  avg {_avg_cell(meter.average_hz(name))} Hz  ·  "
         + ("[dim]waiting for data...[/]" if message is None else f"last {now - message.t:.1f}s ago")
         + ("" if not dropped else f"  ·  [bold red]{dropped} dropped[/]")
     )

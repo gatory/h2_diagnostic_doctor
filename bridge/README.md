@@ -95,16 +95,16 @@ uv run h2-doctor telemetry replay FILE                       # play a recording 
 uv run h2-doctor telemetry replay FILE rt/lf/bmsstate -s 4   # one recorded topic, 4x faster
 ```
 
-`watch` subscribes (read-only) to the core topics, `CORE_TOPICS` in `src/h2_bridge/telemetry/core_topics.py`, or to the `TOPIC`s given. A name that isn't core is looked up in the **topic cache** (`bridge/cache/topics.json`, filled by every `discovery topics` run), and only if it isn't cached either, by a 2 s discovery run (which also fills the cache). Put `TOPIC`s before `--record`, or `--record` reads the first one as its name. Ctrl-C stops cleanly (it never cuts a line in half); a second Ctrl-C stops at once. At the end it prints the messages received (and dropped) per topic and where the recording went.
+`watch` subscribes (read-only) to the core topics, `CORE_TOPICS` in `src/h2_bridge/telemetry/core_topics.py`, or to the `TOPIC`s given. A name that isn't core is looked up in the **topic cache** (`bridge/cache/topics.json`, filled by every `discovery topics` run), and only if it isn't cached either, by a 2 s discovery run (which also fills the cache). Put `TOPIC`s before `--record`, or `--record` reads the first one as its name. Ctrl-C stops cleanly (it never cuts a line in half); a second Ctrl-C stops at once. The table shows each topic's rate over the last 2 s and its average since the start (`Avg`). At the end it prints, per topic, the messages received, the average rate (against the expected rate for core topics) and any dropped, then where the recording went.
 
 **Recordings** are gzipped JSON Lines (`.jsonl.gz`, about 10x smaller than plain: ~300 MB/hour for the core topics) in `outputs/telemetry/<date>/`:
 - a header line: start time, host, interface, domain, and each topic's DDS type and expected Hz;
 - one line per message: `t` (arrival time), `topic`, `data`;
-- a footer line when the recording closes: end time, duration, message count, and `dropped` per topic. **No footer** means the recorder died (power loss, `kill -9`).
+- a footer line when the recording closes: end time, duration, message count, `dropped` per topic, and `avg_hz` (each topic's average rate over the recording; footers from before it was added don't have it). **No footer** means the recorder died (power loss, `kill -9`).
 
 Only the watched topics are recorded. The file is flushed about 4 times a second, so a crash loses at most the last ~0.25 s, and a recording is never overwritten. Read one with `zcat FILE | head`. `replay` also reads older plain `.jsonl` recordings.
 
-**`replay`** plays a recording at its recorded pace (`-s/--speed` to change it) in the same table as `watch`. Rates and ages run on the recording's clock, so they match the live run at any speed; the clock stops at the last message. At the end it says whether the recording closed cleanly (footer) or was cut off.
+**`replay`** plays a recording at its recorded pace (`-s/--speed` to change it) in the same table as `watch`. Rates and ages run on the recording's clock, so they match the live run at any speed; the clock stops at the last message. At the end it prints each topic's average rate in the replay next to the one saved when it was recorded (they should match), and says whether the recording closed cleanly (footer) or was cut off.
 
 **The live table.** Two views:
 
@@ -172,9 +172,9 @@ src/h2_bridge/
                     #   sources/base_source.py = Source (the shared interface) and TopicError
                     #   sources/live_source.py = LiveSource: the robot over DDS (the only telemetry module that touches DDS)
                     #   sources/replay_source.py = ReplaySource: a recording, played back at its original pace
-                    #   recording_format.py = the .jsonl.gz format: RecordingWriter, open_recording, read_header, read_line
+                    #   recording_format.py = the .jsonl.gz format: RecordingWriter, RecordingReader
                     #   topic_lookup.py = topic names -> TopicSpecs (core, then the topic cache, then a short discovery run)
-                    #   rate_meter.py = RateMeter, latest()
+                    #   rate_meter.py = RateMeter (recent and average rates), latest()
   robot/            # robot facts, plain data (no telemetry imports):
                     #   joints.py  = body and hand slots -> joint names and limits
                     #   sensors.py = battery cell and main board temperature counts, IMU notes

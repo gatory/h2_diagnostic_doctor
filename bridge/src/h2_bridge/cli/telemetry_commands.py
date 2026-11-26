@@ -31,7 +31,8 @@ core topics: rt/lf/lowstate, rt/lf/secondary_imu, rt/lf/bmsstate, rt/lf/mainboar
              rt/dex5/left/state, rt/dex5/right/state
 
 overview columns:
-  Hz        measured rate / expected rate (green: on rate, yellow: slow, red: silent or stale)
+  Hz        rate over the last 2 s / expected rate (green: on rate, yellow: slow, red: silent or stale)
+  Avg       average rate since the start (also printed at the end, and saved in a recording's footer)
   Last      seconds since the topic's newest message (red: stale)
   Summary   a few key fields of the newest message; "?" marks an unconfirmed unit
 """
@@ -145,13 +146,13 @@ def _cmd_watch(args):
             saving = f" to [bold]{recorder.path}[/]" if recorder else ""
             err.print(f"Watching {len(topics)} topic(s) on [bold]{args.interface}[/] "
                       f"(domain {args.domain_id}){saving}. Ctrl-C to stop.")
-            counts = _play(source, recorder, args.duration, show_table=not args.quiet)
+            meter = _play(source, recorder, args.duration, show_table=not args.quiet)
     except (TopicError, DDSError) as e:
         err.print(f"[bold red]Can't watch:[/] {e}")
         return 1
 
-    _print_summary(err, counts, source.dropped, recorder)
-    if not any(counts.values()):
+    _print_summary(err, source.topics, meter, source.dropped, recorder)
+    if not any(meter.total.values()):
         err.print("[bold red]No data received.[/] Check the interface and domain ID.")
         return 1
     return 0
@@ -184,13 +185,16 @@ def _cmd_replay(args):
               f"[bold]{header.get('host', '?')}[/] ({header.get('interface', '?')}) at {args.speed:g}x. "
               "Ctrl-C to stop.")
     with source:
-        counts = _play(source, None, None, show_table=True)
+        meter = _play(source, None, None, show_table=True)
 
-    _print_summary(err, counts, None, None)
+    recorded_hz = (source.footer or {}).get("avg_hz")  # None: no footer, or one from before avg_hz
+    _print_summary(err, source.topics, meter, None, None, recorded_hz)
     if source.footer:
         dropped = sum(source.footer.get("dropped", {}).values())
         err.print(f"Recording ended cleanly: {source.footer.get('messages', '?')} messages over "
                   f"{source.footer.get('duration_s', '?')} s, {dropped} dropped while recording.")
+        if recorded_hz is None:
+            err.print("[dim]This recording's footer has no average rates (made before they were saved).[/]")
     elif not str(args.file).endswith(".gz"):
         err.print("[dim]Plain .jsonl recording (made before footers): no record of drops.[/]")
     elif source.done:
@@ -200,11 +204,13 @@ def _cmd_replay(args):
 
 
 def _play(source, recorder, duration, show_table):
-    """Run the loop on `source` with its consumers; return {topic: messages seen}.
+    """Run the loop on `source` with its consumers; return the RateMeter.
 
-    Every batch goes to the recorder (if any) and, with `show_table`, to the
-    live table: rates from every message, values from the newest per topic.
-    One TOPIC gets the every-value view; several get the overview.
+    Every batch goes to the rate meter (always, so rates exist even with
+    --quiet), the recorder (if any) and, with `show_table`, the live table:
+    rates from every message, values from the newest per topic. One TOPIC gets
+    the every-value view; several get the overview. The meter's `total` is the
+    message count per topic.
     """
     from rich.console import Console
     from rich.live import Live
@@ -212,11 +218,10 @@ def _play(source, recorder, duration, show_table):
     from h2_bridge.cli import telemetry_tables
     from h2_bridge.telemetry.rate_meter import RateMeter, latest
 
-    counts = dict.fromkeys(source.topics, 0)
     meter = RateMeter()
     newest = {}  # topic -> newest Message so far
     detail = next(iter(source.topics)) if len(source.topics) == 1 else None
-    dropped = getattr(source, "dropped", None)  # only a live source can drop
+    dropped = source.dropped  # None for a replay: it can't drop
 
     def draw(now):
         if detail:
@@ -225,21 +230,19 @@ def _play(source, recorder, duration, show_table):
         return telemetry_tables.watch_table(source.topics, newest, meter, dropped, now)
 
     def on_poll(messages, now):
+        meter.add(messages)  # every message, table or not
         if recorder:
             recorder.write(messages)
-        for m in messages:
-            counts[m.topic] += 1
         if show_table:
-            meter.add(messages)  # every message
             newest.update(latest(messages))  # only the newest, for display
             live.update(draw(now), refresh=True)
 
     if not show_table:
         _run(source, duration, on_poll)
-        return counts
+        return meter
     with Live(draw(source.now()), console=Console(), auto_refresh=False) as live:
         _run(source, duration, on_poll)
-    return counts
+    return meter
 
 
 def _run(source, duration, on_poll):
@@ -271,11 +274,18 @@ def _run(source, duration, on_poll):
         signal.signal(signal.SIGINT, previous)
 
 
-def _print_summary(err, counts, dropped, recorder):
-    """One line per topic: messages seen (and dropped, live only); then where the recording went."""
-    for topic, n in counts.items():
+def _print_summary(err, topics, meter, dropped, recorder, recorded_hz=None):
+    """One line per topic: messages, average rate (vs expected for core topics; vs the
+    recording's own average on a replay), drops (live only); then where the recording went."""
+    for topic, spec in topics.items():
+        avg = meter.average_hz(topic)
+        rate = "   -  Hz" if avg is None else f"{avg:6.2f} Hz"
+        if spec.expected_hz:
+            rate += f" / {spec.expected_hz:g} expected"
+        if recorded_hz and recorded_hz.get(topic) is not None:
+            rate += f" · {recorded_hz[topic]:g} Hz when recorded"
         lost = f"  [red]{dropped[topic]} dropped[/]" if dropped and dropped[topic] else ""
-        err.print(f"  {topic:<28} {n:>8} messages{lost}")
+        err.print(f"  {topic:<28} {meter.total.get(topic, 0):>8} messages  avg {rate}{lost}")
     if recorder:
         err.print(f"Saved {recorder.count} messages to [bold]{recorder.path}[/]")
 
