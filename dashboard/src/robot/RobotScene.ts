@@ -6,6 +6,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer, type CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js'
 import URDFLoader, { type URDFRobot, type URDFVisual } from 'urdf-loader'
+import type { Joint } from '../bridge/protocol'
 import { Backdrop } from './backdrop'
 import { blackenEyes } from './head'
 import { SAMPLE_MARKERS, createMarker } from './markers'
@@ -60,6 +61,11 @@ type CameraMove = {
 
 export type SceneStatus = { state: 'loading' } | { state: 'ready' } | { state: 'error'; message: string }
 
+/** Bridge joint name -> URDF joint name: "L_hip_roll" -> "left_hip_roll_joint", "waist_yaw" -> "waist_yaw_joint". */
+export function urdfJointName(bridgeName: string): string {
+  return bridgeName.replace(/^L_/, 'left_').replace(/^R_/, 'right_') + '_joint'
+}
+
 export class RobotScene {
   robot: URDFRobot | null = null
 
@@ -79,6 +85,8 @@ export class RobotScene {
   private direction = new THREE.Vector3() // scratch for camera moves
   private disposed = false
   private container: HTMLElement
+  private pose: Joint[] | null = null // newest pose, applied once the model has loaded
+  private unknownJoints = new Set<string>() // bridge names with no URDF joint, warned about once
 
   constructor(container: HTMLElement, onStatus: (status: SceneStatus) => void) {
     this.container = container
@@ -131,6 +139,7 @@ export class RobotScene {
       robot.updateMatrixWorld(true)
       robot.position.y -= new THREE.Box3().setFromObject(robot).min.y // feet on the floor
       this.robot = robot
+      if (this.pose) this.setPose(this.pose) // data arrived before the meshes
       this.flyTo(this.framing, INTRO_MS)
       this.addMarkers(robot)
       onStatus({ state: 'ready' })
@@ -190,6 +199,27 @@ export class RobotScene {
     for (const marker of this.markers) {
       const x = marker.getWorldPosition(this.projected).project(this.camera).x
       marker.element.dataset.side = x < centerX ? 'left' : 'right'
+    }
+  }
+
+  /**
+   * Pose the model from the bridge's joints, matched by name (never by slot). A joint whose q is
+   * null (no data, or NaN on the robot) keeps its last angle. Before the model has loaded, the pose
+   * is kept and applied when it's ready.
+   */
+  setPose(joints: Joint[]) {
+    this.pose = joints
+    const robot = this.robot
+    if (!robot) return
+    for (const joint of joints) {
+      if (joint.q === null) continue
+      const name = urdfJointName(joint.name)
+      if (!robot.joints[name]) {
+        if (!this.unknownJoints.has(name)) console.warn(`no URDF joint ${name} for bridge joint ${joint.name}`)
+        this.unknownJoints.add(name)
+        continue
+      }
+      robot.setJointValue(name, joint.q)
     }
   }
 
