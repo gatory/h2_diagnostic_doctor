@@ -96,3 +96,13 @@ From Unitree's H2 SDK Development Guide, "Remote Control Data" (last updated 202
 
 - The docs' conversion example reads `unitree_go::msg::dds_::LowState_` (it looks copied from the Go2 docs); on the H2 the message is `unitree_hg::msg::dds_::LowState_`, with the same `wireless_remote` field.
 - *Open:* the doc's diagram maps each button to the physical controller; our names are only the docs' field names. Pressing each button once while recording would confirm the bit order on the real controller.
+
+## `rt/arm_sdk` moves the arms but not the head (2026-11-26)
+
+Unitree's own `example/h2/high_level/h2_arm_sdk_dds_example.py` (unitree_sdk2_python `814556d`), run twice on the robot, in FSM 4 (probably; the example only accepts 4 or 703). Recording: `outputs/telemetry/2026-11-26/armsdk_example_152442_eth10.jsonl.gz`.
+
+- **The arms follow the example's stages**, short of each target as a stiffness-only command against gravity would: "zero posture" brings the elbows to 0.14-0.15 rad (target 0); "lift" gives shoulder roll ±0.27 (target ±0.35) and elbows 0.62-0.72 (target 0.52). Afterwards Unitree's controller puts them back to rest (elbows ~1.0).
+- **The head doesn't move at all.** Commanded to pitch 15° (0.262 rad) and yaw 20° (0.349 rad) with kp 30, it stayed at pitch 0.052-0.062 and yaw 0.004-0.006 the whole time. Its torque didn't react either (pitch drifted slowly from -1.88 to -1.58, yaw -0.22 to -0.16, unrelated to the stages), while a kp of 30 pulling 0.2 rad would show about 6. **So the command wasn't resisted: it was ignored.** Head motors stayed in mode 1 throughout.
+- Nothing else was disturbed: the legs and waist held still (L_knee 0.568-0.575, waist_yaw within ±0.006), no motor error bits, no dropped messages, `mode_pr` 0 throughout; checkup passed.
+- **Setup notes:** the example needs the SDK's CRC library, which a built (non-editable) install of `unitree_sdk2py` leaves out (its `setup.py` has no `package_data`); on the Jetson the bridge's environment installs the SDK editable for that. FSM 0 refuses `arm_sdk` (the example checks first).
+- *Open:* does FSM 703 hand the head to `arm_sdk`? Do Unitree's docs list which joints `arm_sdk` covers? The SDK's `LocoClient` has no head or gaze call.

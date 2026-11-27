@@ -151,6 +151,17 @@ It listens to the core topics (or replays a recording), runs every rule on each 
 
 Every limit, and where its number came from, is in `src/h2_bridge/checkup/limits.py`; the healthy-robot measurements behind them are in `docs/robot_findings.md`. Temperatures and fields of unknown meaning (`fan_state`, `bmsstate`, `mode`, the hand IMU temperature) are never judged. **Timing:** problems are flagged **at once**, on the first poll that sees them (like the MVP). A value that can hover at a threshold (joint limits, cell spread, charge, the IMU leftover) has **hysteresis** instead: once on, it stays on until the value is a margin back on the good side (`*_MARGIN` in `limits.py`, `checkup/rules/bands.py`), so it doesn't flicker. Only `imu_agreement` still waits 1 s, because the two IMUs' messages are a few ms apart and one snapshot can disagree during fast motion.
 
+### `motion_tests/`: scripts that move the robot
+
+Not part of `h2-doctor`, which only ever listens. These standalone scripts **send commands**:
+
+```bash
+uv run python motion_tests/head_lowcmd.py --dry-run   # print the planned head targets, no robot
+uv run python motion_tests/head_lowcmd.py eth10       # on the Jetson; robot on the gantry
+```
+
+`head_lowcmd.py` moves only the head (yaw ±10°, pitch ±5°, slowly) through `rt/lowcmd`. That **releases Unitree's motion control**, so nothing balances the robot: gantry only, someone at the e-stop. Every other motor is held in damping. **Ctrl-C stops it at once** (head soft, all damping), and it stops itself if `rt/lowstate` goes quiet, a head motor reports an error, or the head leaves its clamped range. At the end it asks before handing control back to Unitree's mode. It needs the SDK's CRC library: install the SDK editable on the Jetson (see `docs/robot_findings.md`).
+
 ### Saved files
 
 Saved files go in `bridge/outputs/` (ignored by git), organized by group and date:
