@@ -51,8 +51,15 @@ examples:
 
 _MODES_EXAMPLES = """\
 examples:
-  h2-doctor discovery modes                  ask every query once
+  h2-doctor discovery modes                  ask every query once (motion clips summed up)
+  h2-doctor discovery modes --all            ... and list every motion clip FSM too
   h2-doctor discovery modes --timeout 3      wait longer for slow answers
+  h2-doctor discovery modes --watch          print the FSM state each time it changes, until Ctrl-C
+  h2-doctor discovery modes --map            step through Zero torque, Damp, Ready, Walk 1, Walk 2:
+                                             put the robot in each with the remote, press Enter,
+                                             and get (and save) which FSM id each one is
+
+--watch and --map only read: change modes with the remote as usual (on the gantry).
 
 Each query is one request to a Unitree service (rt/api/<service>/request); a
 "no answer (timeout)" usually means that service isn't running in this mode.
@@ -133,6 +140,21 @@ def register(commands):
         "--timeout", type=float, default=1.0, metavar="SECS",
         help="how long to wait for each answer (default: %(default)s)",
     )
+    modes.add_argument(
+        "--all", action="store_true",
+        help="list every motion clip FSM (ids 100000+); by default they're summed up in one line",
+    )
+    # One of: the one-shot table (default), --watch or --map.
+    how = modes.add_mutually_exclusive_group()
+    how.add_argument(
+        "-w", "--watch", action="store_true",
+        help="ask for the FSM state once a second and print a line each time it changes, until Ctrl-C",
+    )
+    how.add_argument(
+        "-m", "--map", action="store_true",
+        help="guided: put the robot in each gear (Zero torque, Damp, Ready, Walk 1, Walk 2) with the "
+             "remote, press Enter, and get which FSM id it is; saved to outputs/discovery/",
+    )
     modes.set_defaults(func=_cmd_modes)
 
 
@@ -170,9 +192,10 @@ def _cmd_topics(args):
 
 
 def _cmd_modes(args):
-    """Handler for `h2-doctor discovery modes`: one round of the allowlisted queries, as a table.
+    """Handler for `h2-doctor discovery modes [--watch | --map]`.
 
-    Returns 1 if DDS can't start or no query got an answer.
+    Default: one round of the allowlisted queries, as a table. Returns 1 if DDS can't
+    start or no query got an answer (for --watch / --map: if the FSM list can't be read).
     """
     from rich.console import Console
 
@@ -181,12 +204,100 @@ def _cmd_modes(args):
 
     err = Console(stderr=True)
     init_dds(args.interface, args.domain_id)  # DDSError -> one line, from cli()
+    queries = RobotQueries(timeout_s=args.timeout)
+    if args.watch:
+        return _watch_fsm(queries, err)
+    if args.map:
+        return _map_fsm(queries, err, args.interface)
+
     with err.status(f"Asking on [bold]{args.interface}[/] (domain {args.domain_id})..."):
-        answers = RobotQueries(timeout_s=args.timeout).ask_all()
-    Console().print(discovery_tables.modes_table(answers))
+        answers = queries.ask_all()
+    Console().print(discovery_tables.modes_table(answers, all_fsms=args.all))
     if not any(a.ok for a in answers):
         err.print("[bold red]No query was answered.[/] Check the interface and domain ID, and that the robot is on.")
         return 1
+    return 0
+
+
+def _fsm_names_or_none(queries, err):
+    """The robot's {fsm id: name}, or None (with a message) if it didn't answer."""
+    from h2_bridge.discovery.fsm_map import fsm_names
+
+    with err.status("Reading the robot's FSM list..."):
+        names = fsm_names(queries.ask("available_fsms"))
+    if not names:
+        err.print("[bold red]The robot didn't send its FSM list.[/] Check the interface and domain ID, "
+                  "and that the robot is on (try --timeout 3).")
+    return names or None
+
+
+def _watch_fsm(queries, err):
+    """--watch: one line per FSM change (and the first reading), until Ctrl-C; then what was seen."""
+    import time
+
+    from h2_bridge.discovery.fsm_map import read_fsm
+
+    names = _fsm_names_or_none(queries, err)
+    if names is None:
+        return 1
+    err.print("Watching the FSM state (asked once a second). Change modes with the remote; Ctrl-C to stop.")
+    last = object()  # nothing matches it, so the first reading always prints
+    seen = []
+    try:
+        while True:
+            reading = read_fsm(queries, samples=1)
+            key = (reading.fsm_id, reading.motion_mode)
+            if key != last:
+                last = key
+                seen.append(reading.fsm_id)
+                err.print(f"{time.strftime('%H:%M:%S')}  {discovery_tables.fsm_text(reading.fsm_id, names)}"
+                          f"  [dim](motion switcher: {reading.motion_mode or '?'})[/]")
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        pass
+    order = " -> ".join(discovery_tables.fsm_text(i, names, markup=False) for i in seen)
+    err.print(f"\nStates seen, in order: {order or 'none'}")
+    return 0
+
+
+def _map_fsm(queries, err, interface):
+    """--map: for each gear, ask the person to set it with the remote, then read the FSM id."""
+    from rich.console import Console
+
+    from h2_bridge.discovery.fsm_map import WALKTHROUGH, read_fsm, save_fsm_map
+
+    names = _fsm_names_or_none(queries, err)
+    if names is None:
+        return 1
+    err.print(f"Mapping {len(WALKTHROUGH)} modes. For each one: put the robot in it with the remote, wait until "
+              "it has settled, then press Enter. Type s + Enter to skip one, Ctrl-C to stop.\n")
+    steps = []
+    try:
+        for n, (gear, label) in enumerate(WALKTHROUGH, 1):
+            answer = err.input(f"[bold]{n}/{len(WALKTHROUGH)}  {label}[/]: set it with the remote, then Enter ")
+            if answer.strip().lower() == "s":
+                steps.append((gear, label, None))
+                err.print("   [dim]skipped[/]")
+                continue
+            while True:
+                with err.status("   reading..."):
+                    reading = read_fsm(queries)  # 3 readings over 1 s: catches a mode still switching
+                err.print(f"   -> {discovery_tables.fsm_text(reading.fsm_id, names)}")
+                if reading.stable:
+                    break
+                again = err.input(f"   [yellow]still changing {reading.seen}[/]: Enter to read again, "
+                                  "k + Enter to keep the last one ")
+                if again.strip().lower() == "k":
+                    break
+            steps.append((gear, label, reading))
+    except (KeyboardInterrupt, EOFError):
+        err.print("\n[dim]Stopped early.[/]")
+
+    if not steps:
+        return 0
+    Console().print(discovery_tables.fsm_map_table(steps, names))
+    path = save_fsm_map(steps, names, interface)
+    err.print(f"[green]Saved to[/] {path}")
     return 0
 
 

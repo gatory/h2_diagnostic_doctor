@@ -8,7 +8,9 @@ per kind of row:
     participants_table(snapshot)              one row per participant
     endpoints_table(name, info, snapshot)     one row per writer/reader of one topic
     saved_table(files)                        one row per saved snapshot file
-    modes_table(answers)                      one row per robot query (discovery modes)
+    modes_table(answers, all_fsms)            one row per robot query (discovery modes)
+    fsm_map_table(steps, names)               one row per mode stepped through (discovery modes --map)
+    fsm_text(fsm_id, names)                   "601 HybridWalk", for --watch and --map lines
 
 participants_table and endpoints_table share the owner columns
 (Participants, Process, PID, Host, IP) via the _owner_* helpers below.
@@ -155,8 +157,15 @@ def saved_table(files):
     return table
 
 
-def modes_table(answers):
-    """One row per robot_queries.Answer: the query, its answer (or the error), and how long it took."""
+# FSM ids from here up are motion clips (BeyondMimic_..., HumanMimic_...): ~250 of them on the H2.
+MOTION_CLIP_IDS = 100000
+
+
+def modes_table(answers, all_fsms=False):
+    """One row per robot_queries.Answer: the query, its answer (or the error), and how long it took.
+
+    The FSM list shows the main states; the motion clips are summed up in one line unless `all_fsms`.
+    """
     from rich.table import Table
 
     from h2_bridge.robot_queries import QUERIES
@@ -170,7 +179,7 @@ def modes_table(answers):
     for answer in answers:
         _, method, _ = QUERIES[answer.name]
         if answer.ok:
-            text = _answer_text(answer)
+            text = _answer_text(answer, all_fsms)
         else:
             text = f"[red]{answer.error}[/] [dim]({answer.code})[/]"
         table.add_row(answer.name, method, text, f"{answer.seconds * 1000:.0f}")
@@ -178,7 +187,7 @@ def modes_table(answers):
     return table
 
 
-def _answer_text(answer):
+def _answer_text(answer, all_fsms=False):
     """An answer's value as text; available_fsms as one "id name" line per state."""
     import json
 
@@ -186,7 +195,44 @@ def _answer_text(answer):
 
     if answer.name == "available_fsms" and isinstance(answer.value, tuple) and len(answer.value) == 2:
         ids, names = answer.value
-        return "\n".join(f"{i}  {escape(str(n))}" for i, n in zip(ids, names)) or "[dim](none)[/]"
+        rows = [(i, n) for i, n in zip(ids, names) if all_fsms or i < MOTION_CLIP_IDS]
+        lines = [f"{i}  {escape(str(n))}" for i, n in rows]
+        clips = len(ids) - len(rows)
+        if clips:
+            lines.append(f"[dim]+ {clips} motion clips (ids {MOTION_CLIP_IDS}+; --all lists them)[/]")
+        return "\n".join(lines) or "[dim](none)[/]"
     if isinstance(answer.value, (dict, list)):
         return escape(json.dumps(answer.value))
     return escape(str(answer.value))
+
+
+def fsm_text(fsm_id, names, markup=True):
+    """"601 HybridWalk" (bold), or "no answer" when the robot didn't say."""
+    from rich.markup import escape
+
+    if fsm_id is None:
+        return "[red]no answer[/]" if markup else "no answer"
+    name = names.get(fsm_id, "?")
+    return f"[bold]{fsm_id}[/] {escape(str(name))}" if markup else f"{fsm_id} {name}"
+
+
+def fsm_map_table(steps, names):
+    """One row per mode stepped through in --map: the mode, its FSM id and name, and whether it was settled."""
+    from rich.table import Table
+
+    table = Table(title="FSM map (from the remote)", header_style="bold cyan")
+    table.add_column("Mode", style="bold")
+    table.add_column("FSM id", justify="right")
+    table.add_column("FSM name", style="magenta")
+    table.add_column("Readings", style="dim")
+
+    for _, label, reading in steps:
+        if reading is None:
+            table.add_row(label, "-", "[dim]skipped[/]", "")
+            continue
+        fsm_id = "?" if reading.fsm_id is None else str(reading.fsm_id)
+        readings = ", ".join("-" if r is None else str(r) for r in reading.seen)
+        if not reading.stable:
+            readings = f"[yellow]{readings} (changing)[/]"
+        table.add_row(label, fsm_id, str(names.get(reading.fsm_id, "?")), readings)
+    return table
