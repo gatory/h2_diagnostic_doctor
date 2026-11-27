@@ -1,15 +1,21 @@
 // The 3D view: a three.js scene holding the H2 model loaded from its URDF.
 // Plain class, not React: it owns the renderer, camera and animation loop.
+//
+//   scene.setPose(joints)          pose the model from the bridge (by joint name)
+//   scene.setFindings(findings)    tag checkup's findings on the body (at most MAX_TAGS)
+//   scene.focusSubject("L_knee")   fly the camera to a joint; scene.unfocus() flies back
+//   scene.setTheme("light")        repaint the backdrop
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer, type CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js'
 import URDFLoader, { type URDFRobot, type URDFVisual } from 'urdf-loader'
-import type { Joint } from '../bridge/protocol'
-import { Backdrop } from './backdrop'
+import type { Finding, Joint } from '../bridge/protocol'
+import { Backdrop, type Theme } from './backdrop'
+import { MAX_TAGS, createTag, findingAnchor, subjectSide } from './findingTags'
 import { blackenEyes } from './head'
-import { SAMPLE_MARKERS, createMarker } from './markers'
+import { urdfJointName } from './jointNames'
 
 const URDF_URL = '/renders/h2_description/H2.urdf'
 
@@ -19,13 +25,26 @@ const SHELL = new THREE.MeshStandardMaterial({ color: 0xb0b3b7, roughness: 0.32,
 const JOINT = new THREE.MeshStandardMaterial({ color: 0x1c1d20, roughness: 0.6, metalness: 0.2 })
 const BLACK_LINKS = new Set(['waist_yaw_link', 'waist_roll_link']) // "white" in the URDF, black on the robot
 
-// Two framings, one per metrics-panel state. Panel open: the robot faces the camera, slid left
-// into the free 40% of the screen. Panel closed: a 45° side view from the robot's left, close
+// Two framings, one per panel state. Panel open: the robot faces the camera, slid left into
+// the free 40% of the screen. Panel closed (Home): a 45° side view from the robot's left, close
 // enough that the knees sit just below the frame. The camera flies in to the first framing once
 // the model has loaded, and glides between them when the panel toggles.
 const START_DISTANCE = 10
 const INTRO_MS = 2200
 const REFRAME_MS = 700
+
+// Focusing a joint: this far from it, from the side it's on.
+const FOCUS_DISTANCE = 0.9
+const FOCUS_MS = 800
+const FOCUS_DIRECTION = {
+  left: new THREE.Vector3(0.35, 0.2, -1).normalize(), // three.js -Z is the robot's left
+  right: new THREE.Vector3(0.35, 0.2, 1).normalize(),
+  centre: new THREE.Vector3(1, 0.2, 0).normalize(), // from the front
+}
+
+// Fog during the fly-in: thick at the start (the robot appears out of it), normal at the end.
+const INTRO_FOG = { near: 0.5, far: 3 }
+const FOG = { near: 6, far: 16 }
 
 // direction: from the target out to the camera (three.js axes: +X robot's front, -Z robot's left).
 // shiftX: how far the picture slides left, as a fraction of the view's width.
@@ -57,24 +76,27 @@ type CameraMove = {
   toDirection: THREE.Vector3
   start: number
   ms: number
+  clearFog: boolean // the intro: thin the fog as the camera arrives
 }
+
+type Tag = { object: CSS2DObject; detail: HTMLElement }
 
 export type SceneStatus = { state: 'loading' } | { state: 'ready' } | { state: 'error'; message: string }
 
-/** Bridge joint name -> URDF joint name: "L_hip_roll" -> "left_hip_roll_joint", "waist_yaw" -> "waist_yaw_joint". */
-export function urdfJointName(bridgeName: string): string {
-  return bridgeName.replace(/^L_/, 'left_').replace(/^R_/, 'right_') + '_joint'
+export type SceneOptions = {
+  theme?: Theme
+  onFps?: (fps: number) => void // about once a second
+  onFocus?: (subject: string | null) => void // a joint was focused (or null: back to the overview)
 }
 
 export class RobotScene {
   robot: URDFRobot | null = null
 
   private renderer: THREE.WebGLRenderer
-  private labelRenderer = new CSS2DRenderer() // HTML markers drawn over the canvas
-  private markers: CSS2DObject[] = []
+  private labelRenderer = new CSS2DRenderer() // HTML tags drawn over the canvas
   private projected = new THREE.Vector3()
   private scene = new THREE.Scene()
-  private backdrop = new Backdrop()
+  private backdrop: Backdrop
   private camera = new THREE.PerspectiveCamera(40, 1, 0.05, 50)
   private controls: OrbitControls
   private resizeObserver: ResizeObserver
@@ -85,20 +107,30 @@ export class RobotScene {
   private direction = new THREE.Vector3() // scratch for camera moves
   private disposed = false
   private container: HTMLElement
+  private options: SceneOptions
   private pose: Joint[] | null = null // newest pose, applied once the model has loaded
   private unknownJoints = new Set<string>() // bridge names with no URDF joint, warned about once
+  private findings: Finding[] = []
+  private tags = new Map<string, Tag>() // rule/subject/status -> its tag on the body
+  private focused: string | null = null
+  private frames = 0
+  private fpsSince = performance.now()
 
-  constructor(container: HTMLElement, onStatus: (status: SceneStatus) => void) {
+  constructor(container: HTMLElement, onStatus: (status: SceneStatus) => void, options: SceneOptions = {}) {
     this.container = container
+    this.options = options
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(window.devicePixelRatio)
     container.appendChild(this.renderer.domElement)
     this.labelRenderer.domElement.className = 'marker-layer'
     container.appendChild(this.labelRenderer.domElement)
 
+    this.backdrop = new Backdrop(options.theme ?? 'dark')
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.scene.background = this.backdrop.background
     this.scene.fog = this.backdrop.fog
+    this.backdrop.fog.near = INTRO_FOG.near
+    this.backdrop.fog.far = INTRO_FOG.far
     this.scene.add(this.backdrop.group)
     // Soft studio reflections so the materials read as plastic and metal, not flat grey.
     const pmrem = new THREE.PMREMGenerator(this.renderer)
@@ -140,8 +172,8 @@ export class RobotScene {
       robot.position.y -= new THREE.Box3().setFromObject(robot).min.y // feet on the floor
       this.robot = robot
       if (this.pose) this.setPose(this.pose) // data arrived before the meshes
-      this.flyTo(this.framing, INTRO_MS)
-      this.addMarkers(robot)
+      this.flyTo(this.framing, INTRO_MS, true)
+      this.updateTags()
       onStatus({ state: 'ready' })
     }
 
@@ -183,24 +215,7 @@ export class RobotScene {
     }
   }
 
-  private addMarkers(robot: URDFRobot) {
-    for (const spec of SAMPLE_MARKERS) {
-      const link = robot.links[spec.link]
-      if (!link) continue // link renamed in the URDF: skip rather than fail the view
-      const marker = createMarker(spec)
-      link.add(marker)
-      this.markers.push(marker)
-    }
-  }
-
-  // Point each card away from the robot: left of the orbit target on screen -> card on the left.
-  private updateMarkerSides() {
-    const centerX = this.projected.copy(this.controls.target).project(this.camera).x
-    for (const marker of this.markers) {
-      const x = marker.getWorldPosition(this.projected).project(this.camera).x
-      marker.element.dataset.side = x < centerX ? 'left' : 'right'
-    }
-  }
+  // ------------------------------------------------------------ Data from the bridge
 
   /**
    * Pose the model from the bridge's joints, matched by name (never by slot). A joint whose q is
@@ -223,12 +238,84 @@ export class RobotScene {
     }
   }
 
-  /** Reframe the robot for the metrics panel, and hide the markers while it's open. */
+  /** Tag checkup's findings on the body: the worst MAX_TAGS that have a place on it (findings come worst first). */
+  setFindings(findings: Finding[]) {
+    this.findings = findings
+    this.updateTags()
+  }
+
+  private updateTags() {
+    const robot = this.robot
+    if (!robot) return
+    const wanted = new Map<string, { finding: Finding; anchor: THREE.Object3D }>()
+    for (const finding of this.findings) {
+      if (wanted.size >= MAX_TAGS) break
+      const anchor = findingAnchor(finding.subject, robot)
+      if (anchor) wanted.set(`${finding.rule}/${finding.subject}/${finding.status}`, { finding, anchor })
+    }
+    for (const [key, tag] of this.tags) {
+      if (!wanted.has(key)) {
+        tag.object.removeFromParent()
+        tag.object.element.remove()
+        this.tags.delete(key)
+      }
+    }
+    for (const [key, { finding, anchor }] of wanted) {
+      const tag = this.tags.get(key)
+      if (tag) {
+        tag.detail.textContent = finding.message // e.g. "q unchanged for 6.1 s": changes every update
+        continue
+      }
+      const object = createTag(finding, (subject) => this.focusSubject(subject))
+      anchor.add(object)
+      this.tags.set(key, { object, detail: object.element.querySelector('.marker-detail')! })
+    }
+  }
+
+  // Point each card away from the robot: left of the orbit target on screen -> card on the left.
+  private updateTagSides() {
+    const centerX = this.projected.copy(this.controls.target).project(this.camera).x
+    for (const { object } of this.tags.values()) {
+      const x = object.getWorldPosition(this.projected).project(this.camera).x
+      object.element.dataset.side = x < centerX ? 'left' : 'right'
+    }
+  }
+
+  // ------------------------------------------------------------ Camera
+
+  /** Fly to a finding's place on the body, from the side it's on. False if it has no place (battery, topics). */
+  focusSubject(subject: string): boolean {
+    const anchor = this.robot && findingAnchor(subject, this.robot)
+    if (!anchor) return false
+    const target = anchor.getWorldPosition(new THREE.Vector3())
+    this.flyToView(target, FOCUS_DIRECTION[subjectSide(subject)], FOCUS_DISTANCE, 0, FOCUS_MS)
+    this.focused = subject
+    this.options.onFocus?.(subject)
+    return true
+  }
+
+  /** Back to the normal framing after focusSubject(). */
+  unfocus() {
+    if (!this.focused) return
+    this.focused = null
+    this.flyTo(this.framing, FOCUS_MS)
+    this.options.onFocus?.(null)
+  }
+
+  /** Reframe the robot for the side panel, and hide the tags while it's open. */
   setPanelOpen(open: boolean) {
     this.framing = open ? FRAMING.panelOpen : FRAMING.panelClosed
     this.labelRenderer.domElement.classList.toggle('hidden', open)
+    if (this.focused) {
+      this.focused = null
+      this.options.onFocus?.(null)
+    }
     if (this.robot) this.flyTo(this.framing, REFRAME_MS)
     else this.placeForIntro() // not loaded yet: start the fly-in on this framing's line
+  }
+
+  setTheme(theme: Theme) {
+    this.backdrop.setTheme(theme)
   }
 
   private placeForIntro() {
@@ -238,20 +325,26 @@ export class RobotScene {
     this.controls.update()
   }
 
-  private flyTo(framing: Framing, ms: number) {
+  private flyTo(framing: Framing, ms: number, clearFog = false) {
+    const target = new THREE.Vector3(0, framing.targetY, 0)
+    this.flyToView(target, framing.direction, framing.distance, framing.shiftX, ms, clearFog)
+  }
+
+  private flyToView(target: THREE.Vector3, direction: THREE.Vector3, distance: number, shift: number, ms: number,
+                    clearFog = false) {
     const offset = this.camera.position.clone().sub(this.controls.target)
-    const fromDistance = offset.length()
     this.move = {
       fromTarget: this.controls.target.clone(),
-      toTarget: new THREE.Vector3(0, framing.targetY, 0),
-      fromDistance,
-      toDistance: framing.distance,
+      toTarget: target,
+      fromDistance: offset.length(),
+      toDistance: distance,
       fromShift: this.shiftX,
-      toShift: framing.shiftX,
+      toShift: shift,
       fromDirection: offset.normalize(),
-      toDirection: framing.direction,
+      toDirection: direction,
       start: performance.now(),
       ms,
+      clearFog,
     }
     this.controls.enabled = false // no dragging against the animation
   }
@@ -267,6 +360,10 @@ export class RobotScene {
     this.camera.position.copy(this.controls.target).addScaledVector(direction, distance)
     this.shiftX = move.fromShift + (move.toShift - move.fromShift) * eased
     this.applyShift()
+    if (move.clearFog) {
+      this.backdrop.fog.near = INTRO_FOG.near + (FOG.near - INTRO_FOG.near) * eased
+      this.backdrop.fog.far = INTRO_FOG.far + (FOG.far - INTRO_FOG.far) * eased
+    }
     if (t === 1) {
       this.move = null
       this.controls.enabled = true
@@ -295,8 +392,19 @@ export class RobotScene {
     this.updateMove()
     this.controls.update()
     this.renderer.render(this.scene, this.camera)
-    this.updateMarkerSides()
+    this.updateTagSides()
     this.labelRenderer.render(this.scene, this.camera)
+    this.countFrame()
+  }
+
+  private countFrame() {
+    this.frames++
+    const now = performance.now()
+    if (now - this.fpsSince >= 1000) {
+      this.options.onFps?.(Math.round((this.frames * 1000) / (now - this.fpsSince)))
+      this.frames = 0
+      this.fpsSince = now
+    }
   }
 
   /** Stop the loop and free GPU memory. Safe to call twice. */
