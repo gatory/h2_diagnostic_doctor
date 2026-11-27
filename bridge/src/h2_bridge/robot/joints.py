@@ -13,21 +13,23 @@ from math import radians
 # ---------------------------------------------------------------- Body (rt/lf/lowstate)
 # Row i is LowState_.motor_state[i]. LowState_ has 35 slots; only 0..30 are used.
 #
-# HIP_ROLL note: the inner hip roll limit (L min, R max) is measured, not the spec's.
-# Pushed by hand to the stop in damping mode (outputs/telemetry/2026-11-27/LR_hips_091601_eth10):
-# L reached -0.5898, R +0.5905, both ~0.12 rad past the spec's 0.467441, and mirrored.
-# Both use 0.5905 (the larger), since the two sides are the same mechanism.
+# HIP_ROLL note: both hip roll limits are measured, not the spec's. Each leg was pushed
+# by hand to each hard stop and held ~5 s, in damping mode
+# (outputs/telemetry/2026-11-27/LR_hips_091601_eth10):
+#   inner (L min, R max): L -0.5898, R +0.5905; spec 0.467441, ~0.12 rad short of the real stop.
+#   outer (L max, R min): L +2.081,  R -2.076;  spec 2.1688605, ~0.09 rad past the real stop.
+# The two sides mirror each other, so both use the farther of the pair (0.5905, 2.081).
 BODY_JOINTS = [
     # name               min (rad)        max (rad)        slot
     ("L_hip_pitch",      -2.4525975,      2.7754225),      # 0
-    ("L_hip_roll",       -0.5905,         2.1688605),      # 1   min measured (spec -0.467441), see HIP_ROLL note
+    ("L_hip_roll",       -0.5905,         2.081),          # 1   measured, see HIP_ROLL note
     ("L_hip_yaw",        -2.827,          2.827),          # 2
     ("L_knee",           -0.08725,        2.53025),        # 3
     ("L_ankle_roll",     -0.3490658503,   0.296705972783), # 4
     ("L_ankle_pitch",    -1.13446401358,  0.61086523808),  # 5
 
     ("R_hip_pitch",      -2.4525975,      2.7754225),      # 6
-    ("R_hip_roll",       -2.1688605,      0.5905),         # 7   max measured (spec 0.467441), see HIP_ROLL note
+    ("R_hip_roll",       -2.081,          0.5905),         # 7   measured, see HIP_ROLL note
     ("R_hip_yaw",        -2.827,          2.827),          # 8
     ("R_knee",           -0.08725,        2.53025),        # 9
     ("R_ankle_roll",     -0.296705972783, 0.3490658503),   # 10
