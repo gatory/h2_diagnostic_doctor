@@ -113,3 +113,12 @@ def test_the_map_is_saved_with_names_and_skips(tmp_path, monkeypatch):
     assert path.parent.parent.name == "discovery" and path.name.startswith("fsm_map_")
     assert data["gears"]["ready"]["fsm_id"] == 4 and data["gears"]["ready"]["fsm_name"] == "FixStand"
     assert data["gears"]["damp"] is None and data["available_fsms"] == {"4": "FixStand"}
+
+
+def test_gears_match_the_remote_walkthrough():
+    from h2_bridge.robot.fsm import GEARS, gear_of
+
+    # 2026-11-27 `discovery modes --map` on the H2
+    assert [GEARS[g][0] for g, _ in WALKTHROUGH] == [0, 1, 4, 601, 703]
+    assert gear_of(4) == "ready" and gear_of(703) == "walk2"
+    assert gear_of(3) is None and gear_of(100101) is None  # Sit, a motion clip: not gears

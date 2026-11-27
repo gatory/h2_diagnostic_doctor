@@ -157,8 +157,7 @@ def saved_table(files):
     return table
 
 
-# FSM ids from here up are motion clips (BeyondMimic_..., HumanMimic_...): ~250 of them on the H2.
-MOTION_CLIP_IDS = 100000
+from h2_bridge.robot.fsm import MOTION_CLIP_IDS  # FSM ids from here up are motion clips
 
 
 def modes_table(answers, all_fsms=False):
