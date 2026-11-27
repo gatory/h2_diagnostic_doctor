@@ -21,6 +21,9 @@ that connects late is up to date with the first message it gets:
      "checkup": {
         "now": "pass" | "warn" | "fail",      # the worst finding counting right now (pass if none)
         "worst": "pass" | "warn" | "fail" | "no data",   # the worst of the whole run
+        "running_s": 4.2,                     # how long checkup has judged, on the source's clock
+        "preflight_s": 10.0,                  # PREFLIGHT_S: how long before its verdict counts
+        "preflight": true,                    # running_s < preflight_s: show "Preflight...", not a verdict
         "findings": [{"rule": "joint_limits", "subject": "L_knee", "status": "warn",
                       "message": "...", "value": -0.118, "limit": -0.087, "since": ...}, ...]}}
 
@@ -32,6 +35,7 @@ Bump PROTOCOL when a field is renamed or removed (adding one doesn't need it).
 import dataclasses
 import math
 
+from h2_bridge.checkup.limits import PREFLIGHT_S
 from h2_bridge.checkup.models import Status
 
 PROTOCOL = 1
@@ -43,6 +47,7 @@ def snapshot_message(snap, checkup, live):
     del snapshot["t"]  # it's at the top level
     snapshot["bad"] = sorted(snap.bad)
     findings = checkup.findings()  # worst first
+    running = 0.0 if checkup.started is None else checkup.last - checkup.started
     return {
         "type": "snapshot",
         "protocol": PROTOCOL,
@@ -52,6 +57,9 @@ def snapshot_message(snap, checkup, live):
         "checkup": {
             "now": findings[0].status.value if findings else Status.PASS.value,
             "worst": checkup.overall().value,
+            "running_s": _clean(running),
+            "preflight_s": PREFLIGHT_S,
+            "preflight": running < PREFLIGHT_S,
             "findings": [_clean(dataclasses.asdict(f)) for f in findings],
         },
     }

@@ -10,6 +10,14 @@ healthy-robot baselines in docs/robot_findings.md (2026-11-26 recordings); Will 
 as we collect more data
 """
 
+# ---------------------------------------------------------------- Preflight
+
+# How long a checkup runs before its verdict counts: `h2-doctor checkup`'s default run,
+# and the dashboard's "Preflight..." before it shows pass/warn/fail.
+# chosen: longer than every rule's own window (FROZEN_S 5 s, TOPIC_STARTUP_GRACE_S 3 s),
+# so by then each rule has had the chance to see a problem.
+PREFLIGHT_S = 10.0
+
 # ---------------------------------------------------------------- Topics (rules/topics.py)
 
 # A topic that has sent nothing this long after the start is silent (fail).

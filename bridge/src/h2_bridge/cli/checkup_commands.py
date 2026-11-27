@@ -17,7 +17,9 @@ Exit codes: 0 all pass · 1 couldn't run (no data, DDS error, unreadable file)
 
 import argparse
 
-DEFAULT_SECS = 10.0
+from h2_bridge.checkup.limits import PREFLIGHT_S
+
+DEFAULT_SECS = PREFLIGHT_S  # checkup/limits.py: the same length as the dashboard's preflight
 
 _EXAMPLES = """\
 examples:

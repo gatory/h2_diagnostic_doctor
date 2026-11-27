@@ -44,6 +44,16 @@ def test_message_has_named_joints_and_checkups_verdict():
     assert "t" not in msg["snapshot"]  # only at the top level
 
 
+def test_preflight_lasts_until_checkup_has_run_long_enough():
+    from h2_bridge.checkup.limits import PREFLIGHT_S
+
+    for seconds, preflight in ((3.0, True), (PREFLIGHT_S + 1, False)):
+        source, builder, checkup = _judged(seconds=seconds)
+        msg = snapshot_message(builder.snapshot(source.now()), checkup, live=True)["checkup"]
+        assert msg["preflight"] is preflight and msg["preflight_s"] == PREFLIGHT_S
+        assert msg["running_s"] == pytest.approx(seconds - 0.25)  # judged from the first poll on
+
+
 def test_message_is_strict_json():
     source, builder, checkup = _judged()
     msg = snapshot_message(builder.snapshot(source.now()), checkup, live=True)
