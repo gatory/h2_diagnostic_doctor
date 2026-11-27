@@ -8,6 +8,7 @@ per kind of row:
     participants_table(snapshot)              one row per participant
     endpoints_table(name, info, snapshot)     one row per writer/reader of one topic
     saved_table(files)                        one row per saved snapshot file
+    modes_table(answers)                      one row per robot query (discovery modes)
 
 participants_table and endpoints_table share the owner columns
 (Participants, Process, PID, Host, IP) via the _owner_* helpers below.
@@ -152,3 +153,40 @@ def saved_table(files):
 
     table.caption = f"{len(files)} snapshot(s) in outputs/discovery/"
     return table
+
+
+def modes_table(answers):
+    """One row per robot_queries.Answer: the query, its answer (or the error), and how long it took."""
+    from rich.table import Table
+
+    from h2_bridge.robot_queries import QUERIES
+
+    table = Table(title="Robot modes (query-only)", header_style="bold cyan")
+    table.add_column("Query", style="bold")
+    table.add_column("SDK call", style="magenta")
+    table.add_column("Answer")
+    table.add_column("ms", justify="right", style="dim")
+
+    for answer in answers:
+        _, method, _ = QUERIES[answer.name]
+        if answer.ok:
+            text = _answer_text(answer)
+        else:
+            text = f"[red]{answer.error}[/] [dim]({answer.code})[/]"
+        table.add_row(answer.name, method, text, f"{answer.seconds * 1000:.0f}")
+    table.caption = f"{sum(a.ok for a in answers)} of {len(answers)} answered"
+    return table
+
+
+def _answer_text(answer):
+    """An answer's value as text; available_fsms as one "id name" line per state."""
+    import json
+
+    from rich.markup import escape
+
+    if answer.name == "available_fsms" and isinstance(answer.value, tuple) and len(answer.value) == 2:
+        ids, names = answer.value
+        return "\n".join(f"{i}  {escape(str(n))}" for i, n in zip(ids, names)) or "[dim](none)[/]"
+    if isinstance(answer.value, (dict, list)):
+        return escape(json.dumps(answer.value))
+    return escape(str(answer.value))

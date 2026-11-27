@@ -13,6 +13,8 @@ snapshots from outputs/discovery/ (works anywhere).
     h2-doctor discovery show --participants         # one row per participant (DDS connection)
     h2-doctor discovery show --endpoints rt/lowcmd  # one row per writer/reader of one topic
 
+    h2-doctor discovery modes                       # ask Unitree's services which mode the robot is in
+
 `show` has one view per kind of row: topics (default), participants,
 endpoints, saved files. This module only parses arguments and prints
 results; the logic is in h2_bridge.discovery and the tables in
@@ -45,6 +47,15 @@ examples:
   h2-doctor discovery show snapshot_155001_eth10    one exact file (name without .json)
   h2-doctor discovery show -p                       who is on the network
   h2-doctor discovery show -e rt/lowcmd             who writes and reads rt/lowcmd
+"""
+
+_MODES_EXAMPLES = """\
+examples:
+  h2-doctor discovery modes                  ask every query once
+  h2-doctor discovery modes --timeout 3      wait longer for slow answers
+
+Each query is one request to a Unitree service (rt/api/<service>/request); a
+"no answer (timeout)" usually means that service isn't running in this mode.
 """
 
 
@@ -108,6 +119,22 @@ def register(commands):
     view.add_argument("-l", "--list", action="store_true", help="one row per saved snapshot file, newest first")
     show.set_defaults(func=_cmd_show)
 
+    # h2-doctor discovery modes [--timeout SECS]
+    modes = discovery_cmds.add_parser(
+        "modes",
+        help="Ask Unitree's services which mode the robot is in (query-only)",
+        description="Send each allowlisted query (h2_bridge/robot_queries.py) once and print the answers: "
+                    "motion switcher mode, FSM id and mode, available FSMs, balance mode, heights, arm_sdk. "
+                    "Query-only: nothing on the robot changes. Needs the robot's network.",
+        epilog=_MODES_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    modes.add_argument(
+        "--timeout", type=float, default=1.0, metavar="SECS",
+        help="how long to wait for each answer (default: %(default)s)",
+    )
+    modes.set_defaults(func=_cmd_modes)
+
 
 def _cmd_topics(args):
     """Handler for `h2-doctor discovery topics`: collect a snapshot, print the per-topic summary, maybe save it."""
@@ -139,6 +166,27 @@ def _cmd_topics(args):
         path = save_snapshot(snapshot, name=args.save)
         err.print(f"[green]Saved snapshot to[/] {path}")
 
+    return 0
+
+
+def _cmd_modes(args):
+    """Handler for `h2-doctor discovery modes`: one round of the allowlisted queries, as a table.
+
+    Returns 1 if DDS can't start or no query got an answer.
+    """
+    from rich.console import Console
+
+    from h2_bridge.dds_setup import init_dds
+    from h2_bridge.robot_queries import RobotQueries
+
+    err = Console(stderr=True)
+    init_dds(args.interface, args.domain_id)  # DDSError -> one line, from cli()
+    with err.status(f"Asking on [bold]{args.interface}[/] (domain {args.domain_id})..."):
+        answers = RobotQueries(timeout_s=args.timeout).ask_all()
+    Console().print(discovery_tables.modes_table(answers))
+    if not any(a.ok for a in answers):
+        err.print("[bold red]No query was answered.[/] Check the interface and domain ID, and that the robot is on.")
+        return 1
     return 0
 
 
