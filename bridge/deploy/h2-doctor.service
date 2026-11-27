@@ -1,0 +1,35 @@
+# systemd service: run `h2-doctor server live` on the Jetson Thor from boot, always on.
+# Read-only: it only subscribes to DDS, never writes to the robot.
+#
+# A template: replace the @...@ placeholders when installing (docs/deploy.md).
+#   @USER@             the Thor user that owns the repo
+#   @BRIDGE@           absolute path to the repo's bridge/ folder
+#   @CYCLONEDDS_HOME@  the CycloneDDS install (what bridge/.envrc sets; systemd never reads .envrc)
+#
+# Logs: journalctl -u h2-doctor -f
+
+[Unit]
+Description=H2 Diagnostic Doctor live server (WebSocket, read-only)
+# Wait for the network to be configured. eth10 may still be coming up: if DDS can't
+# start, the command exits 1 and Restart= tries again.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@BRIDGE@
+Environment=CYCLONEDDS_HOME=@CYCLONEDDS_HOME@
+Environment=LD_LIBRARY_PATH=@CYCLONEDDS_HOME@/lib:@CYCLONEDDS_HOME@/lib64
+# Print each line straight to the journal instead of buffering it.
+Environment=PYTHONUNBUFFERED=1
+# The venv's own entry point, not `uv run`: no dependency on uv being on PATH.
+ExecStart=@BRIDGE@/.venv/bin/h2-doctor --iface eth10 server live
+# Ctrl-C equivalent: the poll loop stops between polls and the server closes cleanly.
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
