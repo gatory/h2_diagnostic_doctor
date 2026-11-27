@@ -52,6 +52,9 @@ export default function App() {
         <ComingSoon open={tab === 'checkup'} title="Checkup">
           Every rule with its status and history. For now, Home's verdict banner lists the current findings.
         </ComingSoon>
+        <ComingSoon open={tab === 'settings'} title="Settings">
+          Nothing to set yet. The bridge address can be changed with ?bridge=ws://host:8765 in the page's URL.
+        </ComingSoon>
       </main>
       <BottomNav view={view} tab={tab} onTab={setTab} />
     </div>
