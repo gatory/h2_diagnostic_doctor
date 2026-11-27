@@ -1,4 +1,16 @@
-/* Tokens from tesla.design.md (neutral inks, 4px radius), plus the dark in-car UI surfaces. */
+/* Styles live in the components as Tailwind classes (className="..."). This file only holds:
+   1. the colour tokens (CSS variables), so dark/light can switch at runtime,
+   2. the Tailwind theme that turns those tokens into classes (bg-panel, text-ok, ...),
+   3. the few things that are simpler as plain CSS: the page base and the robot tags' leader lines. */
+
+@import 'tailwindcss';
+
+/* `light:` variant: applies when <html data-theme="light"> (App's useTheme sets it). Dark is the default. */
+@custom-variant light (&:where([data-theme='light'], [data-theme='light'] *));
+
+/* ------------------------------------------------------------------ 1. Tokens
+   From tesla.design.md (neutral inks, 4px radius), plus the dark in-car UI surfaces.
+   Dark theme by default; :root[data-theme='light'] overrides what differs. */
 :root {
   --primary: #3e6ae1; /* primary buttons only */
   --canvas: #ffffff;
@@ -7,176 +19,94 @@
   --muted: #5c5e62;
   --placeholder: #8e8e8e;
   --frost: rgba(255, 255, 255, 0.75);
-  --radius-xs: 4px;
 
-  --on-dark: #ffffff;
-  --bar: #161718;
-  --panel: #202123;
-  --divider-dark: rgba(255, 255, 255, 0.06);
+  --bar: #161718; /* bottom nav */
+  --panel: #202123; /* side panels, popovers */
+  --on-surface: #ffffff; /* text on --bar / --panel */
+  --divider: rgba(255, 255, 255, 0.06);
+  --tint: rgba(255, 255, 255, 0.05); /* subtle fill on a surface (metric cards, list rows) */
 
-  font-family: Inter, -apple-system, system-ui, Arial, sans-serif;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.43;
-  color: var(--body);
-  background: var(--canvas);
+  --hud-text: #ffffff; /* text drawn straight over the 3D view */
+  --hud-dim: rgba(255, 255, 255, 0.6);
+  --hud-chip: rgba(22, 23, 24, 0.72); /* frosted background for boxes over the 3D view */
+  --hud-border: rgba(255, 255, 255, 0.08);
+
+  /* checkup's verdicts: the only colours that mean something */
+  --ok: #3fb950;
+  --warn: #d29922;
+  --fail: #f85149;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
+:root[data-theme='light'] {
+  --bar: #f4f4f4;
+  --panel: #ffffff;
+  --on-surface: #171a20;
+  --placeholder: #5c5e62;
+  --divider: rgba(0, 0, 0, 0.08);
+  --tint: rgba(0, 0, 0, 0.04);
+  --hud-text: #171a20;
+  --hud-dim: rgba(23, 26, 32, 0.62);
+  --hud-chip: rgba(255, 255, 255, 0.78);
+  --hud-border: rgba(0, 0, 0, 0.08);
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --fail: #cf222e;
 }
 
-.app {
-  display: grid;
-  grid-template-rows: 1fr auto;
-  height: 100%;
+/* ------------------------------------------------------------------ 2. Tailwind theme
+   `inline`: classes point at the variables above, so switching data-theme recolours everything.
+   e.g. bg-panel, text-on-surface, text-hud-dim, border-hud-border, text-ok, bg-warn. */
+@theme inline {
+  --color-primary: var(--primary);
+  --color-canvas: var(--canvas);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-muted: var(--muted);
+  --color-placeholder: var(--placeholder);
+  --color-frost: var(--frost);
+  --color-bar: var(--bar);
+  --color-panel: var(--panel);
+  --color-on-surface: var(--on-surface);
+  --color-divider: var(--divider);
+  --color-tint: var(--tint);
+  --color-hud: var(--hud-text);
+  --color-hud-dim: var(--hud-dim);
+  --color-hud-chip: var(--hud-chip);
+  --color-hud-border: var(--hud-border);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-fail: var(--fail);
+
+  --radius-xs: 4px; /* tesla.design.md: one radius everywhere (`rounded-xs`) */
+  --font-sans: Inter, -apple-system, system-ui, Arial, sans-serif;
 }
 
-.stage {
-  position: relative;
-  min-height: 0;
-  overflow: hidden; /* the closed metrics panel hides past the right edge */
+/* ------------------------------------------------------------------ 3. Plain CSS */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.43;
+    color: var(--body);
+    background: var(--canvas);
+  }
 }
 
-.bottom-nav {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  height: 64px;
-  padding: 0 32px;
-  background: var(--bar);
-  border-top: 1px solid var(--divider-dark);
-  color: var(--placeholder);
-}
-
-.bottom-nav-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.bottom-nav-right {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--placeholder);
-}
-
-.bottom-nav-tabs {
-  display: flex;
-  gap: 8px;
-}
-
-.bottom-nav-tabs button,
-.panel-toggle {
-  height: 32px;
-  padding: 4px 16px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--placeholder);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.33s, background-color 0.33s;
-}
-
-.bottom-nav-tabs button:hover,
-.panel-toggle:hover {
-  color: var(--on-dark);
-}
-
-.bottom-nav-tabs button.active,
-.panel-toggle.active {
-  color: var(--on-dark);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-/* Metrics panel: a card over the right 60% of the screen, slides in from the right edge. */
-.metrics-panel {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  bottom: 24px;
-  width: 60vw;
-  box-sizing: border-box;
-  padding: 32px;
-  overflow-y: auto;
-  background: var(--panel);
-  border-radius: var(--radius-xs);
-  transform: translateX(0);
-  transition: transform 0.7s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.7s; /* matches REFRAME_MS */
-}
-
-.metrics-panel:not(.open) {
-  transform: translateX(calc(100% + 20px));
-  opacity: 0;
-  pointer-events: none;
-}
-
-.metrics-panel h2 {
-  margin: 0 0 16px;
-  font-size: 17px;
-  font-weight: 500;
-  color: var(--on-dark);
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 8px;
-}
-
-.metric {
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: var(--radius-xs);
-}
-
-.metric-label {
-  color: var(--placeholder);
-}
-
-.metric-value {
-  margin-top: 4px;
-  font-size: 22px;
-  line-height: 1.2;
-  color: var(--on-dark);
-}
-
-.robot-view {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-}
-
-.overlay {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--placeholder);
-  pointer-events: none;
-}
-
-.overlay.error {
-  color: var(--on-dark);
-}
-
-/* Metric markers (src/robot/markers.ts), drawn by three's CSS2DRenderer over the canvas. */
+/* Robot tags (src/robot/findingTags.ts), drawn by three's CSS2DRenderer over the canvas. The
+   marker is a zero-size point on the joint; RobotScene sets data-side so the line and card point
+   away from the robot. The colours and the card's look are Tailwind classes in findingTags.ts. */
 .marker-layer {
   position: absolute;
   top: 0;
   left: 0;
-  pointer-events: none; /* let drags reach the orbit controls */
+  pointer-events: none; /* drags reach the orbit controls; the cards opt back in */
   transition: opacity 0.33s;
 }
 
@@ -184,112 +114,7 @@ body,
   opacity: 0;
 }
 
-.marker {
-  width: 0;
-  height: 0;
-}
-
-.marker-dot {
-  position: absolute;
-  left: -4px;
-  top: -4px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--ink);
-}
-
-.marker-line {
-  position: absolute;
-  top: 0;
-  width: 56px;
-  height: 1px;
-  background: var(--ink);
-}
-
-.marker-card {
-  position: absolute;
-  top: 0;
-  transform: translateY(-50%);
-  padding: 8px 12px;
-  white-space: nowrap;
-  background: var(--frost);
-  backdrop-filter: blur(8px);
-  border-radius: var(--radius-xs);
-}
-
 .marker[data-side='right'] .marker-line { left: 4px; }
 .marker[data-side='right'] .marker-card { left: 64px; }
 .marker[data-side='left'] .marker-line { right: 4px; }
 .marker[data-side='left'] .marker-card { right: 64px; text-align: right; }
-
-.marker-title {
-  color: var(--muted);
-}
-
-.marker-value {
-  font-size: 17px;
-  font-weight: 500;
-  line-height: 1.18;
-  color: var(--ink);
-}
-
-.marker-detail {
-  color: var(--muted);
-}
-
-/* Bridge connection and checkup verdicts (src/bridge/). Colors only mark what checkup decided. */
-:root {
-  --ok: #3fb950;
-  --warn: #d29922;
-  --fail: #f85149;
-}
-
-.status-dot.ok {
-  background: var(--ok);
-}
-
-.status-dot.off {
-  background: var(--fail);
-}
-
-.metric-value.status-pass {
-  color: var(--ok);
-}
-
-.metric-value.status-warn {
-  color: var(--warn);
-}
-
-.metric-value.status-fail {
-  color: var(--fail);
-}
-
-.findings {
-  margin: 16px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 4px;
-}
-
-.findings li {
-  padding: 8px 12px;
-  border-left: 3px solid var(--placeholder);
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: var(--radius-xs);
-  color: var(--on-dark);
-}
-
-.findings li.status-warn {
-  border-left-color: var(--warn);
-}
-
-.findings li.status-fail {
-  border-left-color: var(--fail);
-}
-
-.finding-subject {
-  color: var(--placeholder);
-  margin-right: 6px;
-}
