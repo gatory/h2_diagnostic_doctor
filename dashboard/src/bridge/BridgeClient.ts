@@ -10,6 +10,7 @@ import { PROTOCOL, type SnapshotMessage } from './protocol'
 export type ConnectionState = 'connecting' | 'open' | 'closed'
 
 const RETRY_MS = 2000
+const RATE_WINDOW_MS = 2000 // receivedHz() averages over this
 const DEFAULT_PORT = 8765 // SERVER_DEFAULTS in bridge/src/h2_bridge/constants.py
 
 /** Where the bridge is: ?bridge=ws://host:port, else port 8765 on the host that served this page. */
@@ -29,6 +30,7 @@ export class BridgeClient {
   private retryTimer = 0
   private closed = false
   private warnedProtocol = false
+  private arrivals: number[] = [] // performance.now() of each message in the last RATE_WINDOW_MS
 
   constructor(url: string) {
     this.url = url
@@ -39,6 +41,19 @@ export class BridgeClient {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** Snapshots received per second, over the last 2 s (0 when nothing is arriving). */
+  receivedHz(): number {
+    this.dropOldArrivals(performance.now())
+    return this.arrivals.length / (RATE_WINDOW_MS / 1000)
+  }
+
+  private dropOldArrivals(now: number) {
+    const cutoff = now - RATE_WINDOW_MS
+    let i = 0
+    while (i < this.arrivals.length && this.arrivals[i] < cutoff) i++
+    if (i) this.arrivals.splice(0, i)
   }
 
   /** Disconnect for good (no more retries). Safe to call twice. */
@@ -80,6 +95,9 @@ export class BridgeClient {
       return
     }
     this.latest = message
+    const now = performance.now()
+    this.arrivals.push(now)
+    this.dropOldArrivals(now)
     this.notify()
   }
 

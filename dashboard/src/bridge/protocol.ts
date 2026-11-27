@@ -87,6 +87,9 @@ export type SnapshotMessage = {
   checkup: {
     now: Status // worst finding counting right now ("pass" if none)
     worst: Status // worst of the whole run
+    running_s: number | null // how long checkup has judged, on the source's clock
+    preflight_s: number // how long before its verdict counts (PREFLIGHT_S in checkup/limits.py)
+    preflight: boolean // still in preflight: show progress, not a verdict
     findings: Finding[] // worst first
   }
 }
