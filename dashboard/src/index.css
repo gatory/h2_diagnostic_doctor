@@ -237,3 +237,59 @@ body,
 .marker-detail {
   color: var(--muted);
 }
+
+/* Bridge connection and checkup verdicts (src/bridge/). Colors only mark what checkup decided. */
+:root {
+  --ok: #3fb950;
+  --warn: #d29922;
+  --fail: #f85149;
+}
+
+.status-dot.ok {
+  background: var(--ok);
+}
+
+.status-dot.off {
+  background: var(--fail);
+}
+
+.metric-value.status-pass {
+  color: var(--ok);
+}
+
+.metric-value.status-warn {
+  color: var(--warn);
+}
+
+.metric-value.status-fail {
+  color: var(--fail);
+}
+
+.findings {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.findings li {
+  padding: 8px 12px;
+  border-left: 3px solid var(--placeholder);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-xs);
+  color: var(--on-dark);
+}
+
+.findings li.status-warn {
+  border-left-color: var(--warn);
+}
+
+.findings li.status-fail {
+  border-left-color: var(--fail);
+}
+
+.finding-subject {
+  color: var(--placeholder);
+  margin-right: 6px;
+}
