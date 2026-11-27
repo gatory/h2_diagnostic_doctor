@@ -8,7 +8,7 @@
 //
 // An indicator, not a selector: the dashboard (and the bridge) never change the robot's mode. The
 // current gear comes from the bridge's FSM queries (robot_queries.py, not streamed yet: until then
-// `current` is null and the row shows "FSM unknown"). To preview a gear now: add ?fsm=ready (or
+// `current` is null and the block is outlined in red). To preview a gear now: add ?fsm=ready (or
 // zero_torque, damp, walk1, walk2) to the page's URL.
 
 import { CaretRight } from '@phosphor-icons/react'
@@ -35,10 +35,16 @@ const WALKS = GEARS.slice(3) // W1, W2: either one, from Ready
 
 export function FSMStateBlock({ current }: { current: Gear | null }) {
   const ready = current === 'ready'
-  const label = current ? GEARS.find((g) => g.id === current)!.label : 'FSM unknown'
+  const label = current ? GEARS.find((g) => g.id === current)!.label : null
 
   return (
-    <div className="pointer-events-auto grid gap-1.5 px-1 py-1" aria-label={`Robot mode: ${label}`}>
+    // No FSM state: the whole block is outlined and tinted red (border-fail, bg-fail/15), with no
+    // label under the gears. border-transparent otherwise keeps the size the same, so nothing jumps.
+    <div
+      aria-label={`Robot mode: ${label ?? 'unknown'}`}
+      className={`pointer-events-auto grid gap-1.5 rounded-xs border-2 px-2 py-1.5 transition-colors
+        ${current ? 'border-transparent' : 'border-fail bg-fail/15'}`}
+    >
       <div className="flex items-center gap-1">
         {LINEAR.map((g) => (
           <span key={g.id} className="flex items-center gap-1">
@@ -57,10 +63,13 @@ export function FSMStateBlock({ current }: { current: Gear | null }) {
           ))}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className={current ? 'font-medium text-hud' : 'text-hud-dim'}>{label}</span>
-        {ready && <span className="font-medium text-sky-400 motion-safe:animate-pulse">Ready to walk</span>}
-      </div>
+      {/* The current gear's name (and "Ready to walk"); nothing at all while the state is unknown. */}
+      {label && (
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="font-medium text-hud">{label}</span>
+          {ready && <span className="font-medium text-sky-400 motion-safe:animate-pulse">Ready to walk</span>}
+        </div>
+      )}
     </div>
   )
 }

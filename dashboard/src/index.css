@@ -20,7 +20,7 @@
   --placeholder: #8e8e8e;
   --frost: rgba(255, 255, 255, 0.75);
 
-  --bar: #161718; /* bottom nav */
+  --bar: #000000; /* bottom nav: near black */
   --panel: #202123; /* side panels, popovers */
   --on-surface: #ffffff; /* text on --bar / --panel */
   --divider: rgba(255, 255, 255, 0.06);

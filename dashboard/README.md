@@ -37,7 +37,8 @@ src/
   robot/jointNames.ts     urdfJointName(): bridge "L_hip_roll" -> URDF "left_hip_roll_joint"
   robot/backdrop.ts       studio wall + mirrored floor, dark and light palettes
   ui/home/                Home: homeState() (offline/connecting/waiting/preflight/pass/warn/fail),
-                          StatusBlock, VerdictBanner (+ findings list), TopBar (clock, theme, rates)
+                          FSMStateBlock + BatteryBlock (top left), Clock + ThemeToggle and
+                          VerdictBanner (+ findings list) (top centre), RatesHud (top right), StatusBlock (off)
   ui/MetricsPanel.tsx     the Telemetry tab (for now)
   ui/ComingSoon.tsx       Replays and Checkup tabs (placeholders)
   ui/BottomNav.tsx        connection, tabs

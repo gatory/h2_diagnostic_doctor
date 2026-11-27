@@ -1,13 +1,16 @@
-// The Home screen's layer over the 3D robot: FSM gear row and status (top left), verdict banner (top centre),
-// clock and rates (top right), and a centre message while there's no robot data to show.
+// The Home screen's layer over the 3D robot: FSM gear row + battery, then status (top left), clock + theme switch and verdict banner (top centre),
+// rates (top right), and a centre message while there's no robot data to show.
 
 import type { BridgeView } from '../../bridge/useBridge'
 import type { Theme } from '../../robot/backdrop'
 import { HUD_BOX } from '../styles'
+import { BatteryBlock } from './BatteryBlock'
+import { Clock } from './Clock'
 import { FSMStateBlock, previewGear } from './FSMStateBlock'
 import { homeState, type HomeState } from './homeState'
-import { StatusBlock } from './StatusBlock'
-import { TopBar } from './TopBar'
+// import { StatusBlock } from './StatusBlock' // TODO: re-enable with <StatusBlock /> below
+import { RatesHud } from './RatesHud'
+import { ThemeToggle } from './ThemeToggle'
 import { VerdictBanner } from './VerdictBanner'
 
 type Props = {
@@ -28,12 +31,25 @@ export function HomeOverlay({ view, fps, theme, focused, onToggleTheme, onFocus 
       <div className="absolute top-5 left-5 flex flex-col items-start gap-3">
         {/* The bridge doesn't send the FSM state yet (robot_queries.py, not streamed): null shows "FSM unknown".
             previewGear() reads ?fsm=... from the URL so the row can be tried out meanwhile. */}
-        <FSMStateBlock current={previewGear()} />
+        {/* items-stretch: the battery box is as tall as the FSM box beside it */}
+        <div className="flex items-stretch gap-3">
+          <FSMStateBlock current={previewGear()} />
+          <BatteryBlock view={view} />
+        </div>
         {/* TODO: re-enable this later */}
         {/* <StatusBlock view={view} /> */}
       </div>
-      <VerdictBanner view={view} onFocus={onFocus} />
-      <TopBar view={view} fps={fps} theme={theme} onToggleTheme={onToggleTheme} />
+      {/* Top-centre column: the clock with the dark/light switch beside it, then checkup's verdict under
+          them. left-1/2 puts the column's left edge in the middle of the screen; -translate-x-1/2 pulls
+          it back by half its own width. */}
+      <div className="absolute top-5 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Clock />
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
+        <VerdictBanner view={view} onFocus={onFocus} />
+      </div>
+      <RatesHud view={view} fps={fps} />
       <CentreMessage state={state} url={view.url} />
       {focused && (
         <div className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-xs bg-hud-chip px-3.5 py-1.5 text-hud-dim">
