@@ -12,17 +12,22 @@ from math import radians
 
 # ---------------------------------------------------------------- Body (rt/lf/lowstate)
 # Row i is LowState_.motor_state[i]. LowState_ has 35 slots; only 0..30 are used.
+#
+# HIP_ROLL note: the inner hip roll limit (L min, R max) is measured, not the spec's.
+# Pushed by hand to the stop in damping mode (outputs/telemetry/2026-11-27/LR_hips_091601_eth10):
+# L reached -0.5898, R +0.5905, both ~0.12 rad past the spec's 0.467441, and mirrored.
+# Both use 0.5905 (the larger), since the two sides are the same mechanism.
 BODY_JOINTS = [
     # name               min (rad)        max (rad)        slot
     ("L_hip_pitch",      -2.4525975,      2.7754225),      # 0
-    ("L_hip_roll",       -0.467441,       2.1688605),      # 1
+    ("L_hip_roll",       -0.5905,         2.1688605),      # 1   min measured (spec -0.467441), see HIP_ROLL note
     ("L_hip_yaw",        -2.827,          2.827),          # 2
     ("L_knee",           -0.08725,        2.53025),        # 3
     ("L_ankle_roll",     -0.3490658503,   0.296705972783), # 4
     ("L_ankle_pitch",    -1.13446401358,  0.61086523808),  # 5
 
     ("R_hip_pitch",      -2.4525975,      2.7754225),      # 6
-    ("R_hip_roll",       -2.1688605,      0.467441),       # 7
+    ("R_hip_roll",       -2.1688605,      0.5905),         # 7   max measured (spec 0.467441), see HIP_ROLL note
     ("R_hip_yaw",        -2.827,          2.827),          # 8
     ("R_knee",           -0.08725,        2.53025),        # 9
     ("R_ankle_roll",     -0.296705972783, 0.3490658503),   # 10
