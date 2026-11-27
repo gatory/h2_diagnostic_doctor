@@ -12,7 +12,6 @@
 // zero_torque, damp, walk1, walk2) to the page's URL.
 
 import { CaretRight } from '@phosphor-icons/react'
-import { HUD_BOX } from '../styles'
 
 export const GEARS = [
   { id: 'zero_torque', short: 'Z', label: 'Zero torque' },
@@ -39,7 +38,7 @@ export function FSMStateBlock({ current }: { current: Gear | null }) {
   const label = current ? GEARS.find((g) => g.id === current)!.label : 'FSM unknown'
 
   return (
-    <div className={`pointer-events-auto grid gap-1.5 px-4 py-3 ${HUD_BOX}`} aria-label={`Robot mode: ${label}`}>
+    <div className="pointer-events-auto grid gap-1.5 px-1 py-1" aria-label={`Robot mode: ${label}`}>
       <div className="flex items-center gap-1">
         {LINEAR.map((g) => (
           <span key={g.id} className="flex items-center gap-1">
