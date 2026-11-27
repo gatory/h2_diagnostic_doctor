@@ -64,13 +64,14 @@ dmypy.json
 
 # IDEs and OS files
 .vscode/
-.idea/
+.idea/data
 *.swp
 .DS_Store
 Thumbs.db
 
 # Agents and Logs
 CLAUDE.md
+dashboard/tesla.design.md
 
 # Outputs and Recordings
 bridge/outputs/

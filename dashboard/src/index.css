@@ -1,0 +1,239 @@
+/* Tokens from tesla.design.md (neutral inks, 4px radius), plus the dark in-car UI surfaces. */
+:root {
+  --primary: #3e6ae1; /* primary buttons only */
+  --canvas: #ffffff;
+  --ink: #171a20;
+  --body: #393c41;
+  --muted: #5c5e62;
+  --placeholder: #8e8e8e;
+  --frost: rgba(255, 255, 255, 0.75);
+  --radius-xs: 4px;
+
+  --on-dark: #ffffff;
+  --bar: #161718;
+  --panel: #202123;
+  --divider-dark: rgba(255, 255, 255, 0.06);
+
+  font-family: Inter, -apple-system, system-ui, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.43;
+  color: var(--body);
+  background: var(--canvas);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+}
+
+.stage {
+  position: relative;
+  min-height: 0;
+  overflow: hidden; /* the closed metrics panel hides past the right edge */
+}
+
+.bottom-nav {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 64px;
+  padding: 0 32px;
+  background: var(--bar);
+  border-top: 1px solid var(--divider-dark);
+  color: var(--placeholder);
+}
+
+.bottom-nav-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bottom-nav-right {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--placeholder);
+}
+
+.bottom-nav-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.bottom-nav-tabs button,
+.panel-toggle {
+  height: 32px;
+  padding: 4px 16px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--placeholder);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.33s, background-color 0.33s;
+}
+
+.bottom-nav-tabs button:hover,
+.panel-toggle:hover {
+  color: var(--on-dark);
+}
+
+.bottom-nav-tabs button.active,
+.panel-toggle.active {
+  color: var(--on-dark);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Metrics panel: a card over the right 60% of the screen, slides in from the right edge. */
+.metrics-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  bottom: 24px;
+  width: 60vw;
+  box-sizing: border-box;
+  padding: 32px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-radius: var(--radius-xs);
+  transform: translateX(0);
+  transition: transform 0.7s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.7s; /* matches REFRAME_MS */
+}
+
+.metrics-panel:not(.open) {
+  transform: translateX(calc(100% + 20px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.metrics-panel h2 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--on-dark);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.metric {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-xs);
+}
+
+.metric-label {
+  color: var(--placeholder);
+}
+
+.metric-value {
+  margin-top: 4px;
+  font-size: 22px;
+  line-height: 1.2;
+  color: var(--on-dark);
+}
+
+.robot-view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--placeholder);
+  pointer-events: none;
+}
+
+.overlay.error {
+  color: var(--on-dark);
+}
+
+/* Metric markers (src/robot/markers.ts), drawn by three's CSS2DRenderer over the canvas. */
+.marker-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none; /* let drags reach the orbit controls */
+  transition: opacity 0.33s;
+}
+
+.marker-layer.hidden {
+  opacity: 0;
+}
+
+.marker {
+  width: 0;
+  height: 0;
+}
+
+.marker-dot {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.marker-line {
+  position: absolute;
+  top: 0;
+  width: 56px;
+  height: 1px;
+  background: var(--ink);
+}
+
+.marker-card {
+  position: absolute;
+  top: 0;
+  transform: translateY(-50%);
+  padding: 8px 12px;
+  white-space: nowrap;
+  background: var(--frost);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-xs);
+}
+
+.marker[data-side='right'] .marker-line { left: 4px; }
+.marker[data-side='right'] .marker-card { left: 64px; }
+.marker[data-side='left'] .marker-line { right: 4px; }
+.marker[data-side='left'] .marker-card { right: 64px; text-align: right; }
+
+.marker-title {
+  color: var(--muted);
+}
+
+.marker-value {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.18;
+  color: var(--ink);
+}
+
+.marker-detail {
+  color: var(--muted);
+}
