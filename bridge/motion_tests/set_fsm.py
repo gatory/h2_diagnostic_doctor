@@ -2,6 +2,7 @@
 
     uv run python motion_tests/set_fsm.py eth10        # on the Jetson, from bridge/
     uv run python motion_tests/set_fsm.py --dry-run    # no robot: try the menu with a pretend robot
+    uv run python motion_tests/set_fsm.py eth10 --allow-mimic   # also offer 502 HumanMimic, 503 HumanMimic2
 
     ┌──────────────────────────────────────────────────────────────────────────┐
     │  This COMMANDS the robot: a new FSM state can make it stand, sit, step,  │
@@ -17,6 +18,10 @@ WHAT IT DOES:
   HumanMimic: dances, kicks, runs) are never offered.
 - Each switch needs you to type the target id a second time. `d` is the shortcut
   to Damp (1 Passive), with one confirmation.
+- With --allow-mimic it also offers the two HumanMimic players, 502 and 503 (never
+  BeyondMimic 100, never a clip id): only from Ready (4), confirmed by typing the
+  state's NAME, and then it watches for 15 s and prints every state change (a player
+  may hop into one of its clips, 502xxx/503xxx, or back to another state).
 - After sending, it reads GetFsmId for up to 3 s and says whether the robot got there.
   The robot's own controller decides whether a switch is allowed; a refused one
   shows as an error code, or as the state not changing.
@@ -44,6 +49,13 @@ from h2_bridge.robot.fsm import GEARS, MOTION_CLIP_IDS
 # replay recorded motions.
 EXCLUDED = {100, 502, 503}
 
+# --allow-mimic: these two players only. What entering one bare (no clip chosen) does is unknown
+# (2026-11-27): hold still, wait for input, or play a clip. Hence: only from Ready, typed by name,
+# and watched afterwards. BeyondMimic (100) and every clip id stay off limits.
+MIMIC = {502, 503}
+MIMIC_FROM = 4  # Ready (FixStand)
+MIMIC_WATCH_S = 15.0
+
 # What's known about each core state (2026-11-27). "tried": set with the remote and read back by
 # `discovery modes --map`. The rest have never been switched to: go slowly.
 _TRIED = {fsm_id: gear for gear, (fsm_id, _) in GEARS.items()}
@@ -57,6 +69,8 @@ NOTES = {
     601: "Walk 1 (HybridWalk): balance controller on. No Move is sent: it should stand or step in place.",
     701: "WalkNew: untried walk controller. No Move is sent: it should stand or step in place.",
     703: "Walk 2 (PhaseWalk): balance controller on. No Move is sent: it should stand or step in place.",
+    502: "HumanMimic player: UNTRIED, may play a motion. From Ready only; typed by name.",
+    503: "HumanMimic2 player: UNTRIED, may play a motion. From Ready only; typed by name.",
 }
 
 DAMP = 1
@@ -117,9 +131,26 @@ class PretendRobot:
         return 0
 
 
-def core_states(available):
-    """{id: name} of the states this script offers: below the motion clips, minus the mimic players."""
-    return {i: n for i, n in sorted(available.items()) if i < MOTION_CLIP_IDS and i not in EXCLUDED}
+def core_states(available, allow_mimic=False):
+    """{id: name} of the states this script offers: below the motion clips, minus the mimic players
+    (plus 502/503 with allow_mimic)."""
+    allowed = EXCLUDED - MIMIC if allow_mimic else EXCLUDED
+    return {i: n for i, n in sorted(available.items()) if i < MOTION_CLIP_IDS and i not in allowed}
+
+
+def watch_changes(robot, names, seconds):
+    """Print every FSM state change for `seconds` (Ctrl-C ends it early); return the last reading."""
+    end = time.monotonic() + seconds
+    last = object()
+    reading = None
+    print(f"   watching for {seconds:g} s (Ctrl-C to stop watching; the remote's damp stops the robot)")
+    while time.monotonic() < end:
+        reading = robot.fsm_id()
+        if reading != last:
+            last = reading
+            print(f"   {time.strftime('%H:%M:%S')}  {name_of(reading, names)}")
+        time.sleep(0.2)
+    return reading
 
 
 def name_of(fsm_id, names):
@@ -156,6 +187,8 @@ def main():
     parser.add_argument("interface", nargs="?", default="eth10", help="network interface (default: eth10)")
     parser.add_argument("--domain", type=int, default=0, help="DDS domain (default: 0)")
     parser.add_argument("--dry-run", action="store_true", help="no robot: a pretend robot that follows every switch")
+    parser.add_argument("--allow-mimic", action="store_true",
+                        help="also offer 502 HumanMimic and 503 HumanMimic2 (from Ready only, typed by name)")
     args = parser.parse_args()
 
     robot = PretendRobot() if args.dry_run else Robot(args.interface, args.domain)
@@ -166,7 +199,7 @@ def main():
               "Restore it from the remote/app first; this script doesn't touch it. Nothing was sent.")
         return 1
     names = robot.available()
-    offered = core_states(names)
+    offered = core_states(names, args.allow_mimic)
     if not offered:
         print("The robot didn't send its FSM list (GetAvailableFsmIds). Check the interface. Nothing was sent.")
         return 1
@@ -201,6 +234,25 @@ def main():
             continue
         if target == current:
             print("   already there")
+            continue
+        if target in MIMIC:
+            if current != MIMIC_FROM:
+                print(f"   {names[target]} only from Ready ({MIMIC_FROM} {names.get(MIMIC_FROM)}): switch there first.")
+                continue
+            print(f"   {names[target]} is UNTRIED and may play a motion. Clear space around the robot, a hand on")
+            print("   the remote's damp, nobody within arm's/leg's reach.")
+            confirm = input(f"   Type {names[target]} to send SetFsmId({target}): ").strip()
+            if confirm != names[target]:
+                print("   cancelled, nothing sent")
+                continue
+            code = robot.set_fsm(target)
+            if code != 0:
+                print(f"   SetFsmId({target}) was refused: code {code}. Nothing changed.")
+                continue
+            try:
+                watch_changes(robot, names, MIMIC_WATCH_S)
+            except KeyboardInterrupt:
+                print("   stopped watching (nothing sent)")
             continue
         confirm = input(f"   Send SetFsmId({target}) = {names[target]}? Type {target} again to confirm: ").strip()
         if confirm != str(target):
